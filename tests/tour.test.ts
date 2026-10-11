@@ -103,3 +103,26 @@ describe('Lückenanzeige', () => {
     expect(streetGaps(fake as any).text).toBe('Nummern 1 bis 8, es fehlen 4 und 7');
   });
 });
+
+describe('Zustellablauf: Schnelltasten und Sprache', () => {
+  it('+2, −2 und gegenüber (geometrisch, andere Straßenseite)', async () => {
+    const { quickSteps, oppositeNumber } = await import('../src/preview');
+    const e = street('Elbuferstraße');
+    expect(quickSteps(e, '42')).toEqual({ minus2: '40', plus2: '44', opposite: '41' });
+    expect(oppositeNumber(e, '41')).toBe('42');
+    expect(oppositeNumber(street('Blumenstraße'), '4')).toBe('3');
+    expect(quickSteps(e, '1').minus2).toBeNull();
+    // fehlende Nummer 17: gegenüber trotzdem aus der geschätzten Lage
+    expect(oppositeNumber(e, '17')).toBe('18');
+  });
+
+  it('Spracheingabe: mit Tour nur Tour-Straßen, sonst alle', async () => {
+    const { state } = await import('../src/data');
+    const { matchSpokenStreet } = await import('../src/voice');
+    state.index = index;
+    expect(matchSpokenStreet('Blumenstraße')?.name).toBe('Blumenstraße');
+    await addToTour(street('Elbuferstraße'), 'A');
+    expect(matchSpokenStreet('Blumenstraße')).toBeNull();
+    expect(matchSpokenStreet('Elbufer Straße')?.name).toBe('Elbuferstraße');
+  });
+});

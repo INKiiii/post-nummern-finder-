@@ -10,7 +10,8 @@ import { gps } from '../gps';
 import { locationDeniedBox } from './location';
 import { icon } from './icons';
 import { recentAddresses, recentStreets, remember } from '../recents';
-import { setTarget } from '../session';
+import { getTarget, setTarget } from '../session';
+import { quickSteps } from '../preview';
 import { countUse } from '../tour';
 import { listenForAddress, speechSupported } from '../voice';
 import type { Street } from '../types';
@@ -33,6 +34,7 @@ export function searchScreen(root: HTMLElement, params: { streetId?: string; lis
   const chosen = h('div', { class: 'chosen' });
   const quick = h('div', { class: 'quick' });
   const nearEl = h('div', { class: 'near' });
+  const stepsEl = h('div', { class: 'steps' });
 
   // Nächstgelegene Straße als großer Knopf (nur Nummer noch eingeben)
   let nearKey = '';
@@ -99,7 +101,32 @@ export function searchScreen(root: HTMLElement, params: { streetId?: string; lis
     renderNear();
   };
 
+  // Schnelltasten für den nächsten Brief: −2, +2, gegenüber (zur letzten Nummer dieser Straße)
+  const renderSteps = () => {
+    const t = getTarget();
+    if (!street || !t || t.streetId !== street.id || !t.number) {
+      stepsEl.replaceChildren();
+      quick.hidden = false;
+      return;
+    }
+    const st = quickSteps(street, t.number);
+    const s0 = street;
+    const btn = (label: string, value: string | null) =>
+      value
+        ? h('button', { class: 'step-btn', onClick: () => finish(s0, value) }, h('span', { class: 'step-cap' }, label), h('b', null, value))
+        : h('span', { class: 'step-btn empty' });
+    // Die Schnelltasten ersetzen die Zeile „Zuletzt“ (Platz für große Tasten)
+    quick.hidden = true;
+    stepsEl.replaceChildren(
+      h('span', { class: 'steps-label' }, `Nach Nr. ${t.number}:`),
+      btn('−2', st.minus2),
+      btn('+2', st.plus2),
+      btn('gegenüber', st.opposite),
+    );
+  };
+
   const renderChosen = () => {
+    renderSteps();
     if (!street) {
       chosen.replaceChildren();
       chosen.hidden = true;
@@ -222,6 +249,7 @@ export function searchScreen(root: HTMLElement, params: { streetId?: string; lis
     nearEl,
     h('div', { class: 'search-wrap' }, h('span', { class: 'search-ic' }, icon('search', 20)), input, chosen, suggestions),
     quick,
+    stepsEl,
     numberDisplay,
     keypad({
       value: number,

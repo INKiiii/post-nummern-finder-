@@ -456,3 +456,21 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .sq-btn.small { width: 46px; height: 46px; border-radius: 12px; font-size: 16px; font-weight: 900; }
 .sq-btn.danger { color: var(--danger); }
 .tour-results { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+
+/* Nr. suchen: Schnelltasten für den nächsten Brief, große Tasten */
+.steps { display: flex; gap: 8px; align-items: stretch; margin: 10px 14px 0; }
+.steps:empty { display: none; }
+.steps-label { flex: 0 0 64px; font-size: 14px; font-weight: 800; color: var(--muted); align-self: center; line-height: 1.15; }
+.step-btn {
+  flex: 1; min-height: 62px; border-radius: 18px; border: 3px solid var(--yel); background: var(--panel);
+  color: var(--text); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2px 4px;
+}
+.step-btn.empty { border-style: dashed; border-color: var(--line); background: transparent; }
+.step-btn b { font-size: 26px; font-weight: 900; line-height: 1; }
+.step-cap { font-size: 13px; font-weight: 800; color: var(--muted); }
+.screen-search .key { min-height: 62px; font-size: 36px; }
+.screen-search .key.enter { font-size: 26px; }
+.screen-search .steps:not(:empty) ~ .number-display { margin-top: 2px; }
+.screen-search .key.letter { min-height: 44px; font-size: 22px; }
+.screen-search .number-display { font-size: 52px; min-height: 60px; }
+@media (max-height: 700px) { .screen-search .key { min-height: 56px; } }

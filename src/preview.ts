@@ -2,7 +2,7 @@
 
 import type { Match, StreetMatcher } from './matcher';
 import type { HouseNumber, Street } from './types';
-import { distanceM } from './core';
+import { distanceM, findHouse, makeProjection, parseHouseNumber, projectOnLine } from './core';
 
 export type Side = 'left' | 'right';
 
@@ -96,4 +96,59 @@ export function targetInfo(
   if (along < -PASSED_M) return { kind: 'passed', distance: -along, side, viaDriveway: !!driveway };
   if (along <= PASSED_M && refDist < 40) return { kind: 'here', distance: Math.max(0, along), side, viaDriveway: !!driveway };
   return { kind: 'ahead', distance: Math.max(0, along), side, viaDriveway: !!driveway };
+}
+
+export interface Steps {
+  minus2: string | null;
+  plus2: string | null;
+  opposite: string | null;
+}
+
+/**
+ * Schnelltasten für den nächsten Brief auf derselben Straße: Nummer −2, +2 und die Nummer
+ * gegenüber (geometrisch: nächstes Haus auf der anderen Straßenseite; sonst ±1).
+ */
+export function quickSteps(street: Street, label: string): Steps {
+  const p = parseHouseNumber(label);
+  if (p.num === null) return { minus2: null, plus2: null, opposite: null };
+  const n = p.num;
+  return {
+    minus2: n - 2 >= 1 ? String(n - 2) : null,
+    plus2: String(n + 2),
+    opposite: oppositeNumber(street, label),
+  };
+}
+
+export function oppositeNumber(street: Street, label: string): string | null {
+  const p = parseHouseNumber(label);
+  if (p.num === null) return null;
+  const res = findHouse(street, label, null);
+  if (Number.isFinite(res.lat) && street.lines.some((l) => l.length >= 2)) {
+    const proj = makeProjection(res.lat, res.lon);
+    // nächste Linie zum Ziel
+    let best: { xy: number[][]; r: NonNullable<ReturnType<typeof projectOnLine>> } | null = null;
+    for (const l of street.lines) {
+      if (l.length < 2) continue;
+      const xy = l.map(([la, lo]) => proj.toXY(la, lo));
+      const r = projectOnLine([0, 0], xy);
+      if (r && (!best || r.dist < best.r.dist)) best = { xy, r };
+    }
+    if (best && best.r.dist < 150) {
+      const mySide = Math.sign(best.r.cross);
+      let pick: { label: string; d: number } | null = null;
+      for (const x of street.numbers) {
+        if (x.num === null) continue;
+        const q = projectOnLine(proj.toXY(x.lat, x.lon), best.xy);
+        if (!q || q.dist > 150 || Math.sign(q.cross) === mySide || Math.sign(q.cross) === 0) continue;
+        const d = Math.abs(q.s - best.r.s);
+        if (d < 60 && (!pick || d < pick.d)) pick = { label: x.label, d };
+      }
+      if (pick) return pick.label;
+    }
+  }
+  // Ohne Lage: andere Straßenseite = andere Parität, nächste Nummer
+  const other = street.numbers.filter((x) => x.num !== null && x.num % 2 !== p.num! % 2);
+  if (!other.length) return null;
+  other.sort((a, b) => Math.abs(a.num! - p.num!) - Math.abs(b.num! - p.num!));
+  return other[0].label;
 }
