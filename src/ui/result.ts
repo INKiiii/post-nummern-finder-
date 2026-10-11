@@ -7,12 +7,14 @@ import { openEditor } from './editor';
 import { state, savePoint, deletePoint, uid } from '../data';
 import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet, snapToBuilding } from '../core';
 import { gps, type Fix } from '../gps';
-import { computeGuidance, formatDistance } from '../guidance';
+import { computeGuidance, formatDistance, type Side } from '../guidance';
 import { MapView } from '../mapview';
 import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../houseinfo';
 import { remember } from '../recents';
 import { speechSupported } from '../voice';
 import { locationDeniedBox } from './location';
+import { icon, type IconName } from './icons';
+import { countLetter } from '../stats';
 import { ApproachAlert, setSoundEnabled, soundEnabled, unlockAudio } from '../approach';
 import { deletePhoto, getPhoto, savePhoto, shrinkImage } from '../photos';
 import type { FindResult, Street } from '../types';
@@ -59,14 +61,20 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const number = params.number ?? '';
   const near = (): [number, number] | null => (gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
   let res = findHouse(street, number || '', near());
-  if (number) void remember({ streetId: street.id, streetName: street.name, place: street.place, number });
+  if (number) {
+    void remember({ streetId: street.id, streetName: street.name, place: street.place, number });
+    void countLetter(`${street.id}|${normHouseNumber(number)}`);
+  }
 
-  const distEl = h('div', { class: 'dist' }, '–');
+  // Richtungskarte: farbiger Kreis mit Pfeil, Entfernung, Richtung
+  const dirIconEl = h('div', { class: 'dir-icon' });
+  const distEl = h('div', { class: 'dist' }, '…');
   const sideEl = h('div', { class: 'side' });
-  const gpsEl = h('div', { class: 'gps-status' });
-  const noteEl = h('div', { class: 'note' });
-  const placeEl = h('div', { class: 'note place-note' });
-  const driveEl = h('div', { class: 'drive-guide' });
+  const dirCard = h('div', { class: 'dircard' }, dirIconEl, h('div', { class: 'dir-text' }, distEl, sideEl));
+  const gpsEl = h('span', { class: 'tag' });
+  const noteEl = h('span', { class: 'tag tag-y note' });
+  const placeEl = h('span', { class: 'tag tag-y place-note' });
+  const driveEl = h('span', { class: 'tag tag-w drive-guide' });
   const approachEl = h('div', { class: 'approach', role: 'alert' });
   approachEl.hidden = true;
   const alert = new ApproachAlert();
@@ -85,9 +93,9 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
     const txt = statusNote(res, number);
     noteEl.replaceChildren(
       ...[
-        res.estimated && res.status !== 'none' ? h('span', { class: 'badge-est' }, 'geschätzt') : null,
+        res.estimated && res.status !== 'none' ? h('b', { class: 'badge-est' }, 'geschätzt') : null,
         txt ? h('span', null, ' ' + txt) : null,
-      ].filter((x): x is HTMLSpanElement => !!x),
+      ].filter((x): x is HTMLElement => !!x),
     );
     noteEl.hidden = !txt && !res.estimated;
 
@@ -95,8 +103,8 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
     const t = target();
     const off = t && res.status !== 'street' ? distanceToStreet(street, t.lat, t.lon) : null;
     const parts: string[] = [];
-    if (off !== null && off > 20) parts.push(`Haus liegt ${Math.round(off)} m von der Straße entfernt`);
-    if (drive) parts.push(drive.user ? 'Einfahrt selbst gesetzt' : 'Zufahrt aus den Daten');
+    if (off !== null && off > 20) parts.push(`Haus ${Math.round(off)} m hinter der Straße`);
+    if (drive?.user) parts.push('Einfahrt selbst gesetzt');
     placeEl.textContent = parts.join(' · ');
     placeEl.hidden = !parts.length;
   };
@@ -153,7 +161,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         h(
           'div',
           { class: 'row' },
-          h('button', { class: 'btn big', onClick: () => (close(), takePhoto()) }, '📷 Neues Foto'),
+          h('button', { class: 'btn big', onClick: () => (close(), takePhoto()) }, icon('camera', 22), ' Neues Foto'),
           h(
             'button',
             {
@@ -209,9 +217,9 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         { class: 'dialog' },
         h('h2', null, `${street.name} ${number}`),
         h('p', { class: 'muted' }, acc !== null ? `Speichert deine aktuelle Position (GPS ±${acc} m).` : 'Warte auf GPS …'),
-        h('button', { class: 'btn big primary', onClick: () => saveHere('driveway') }, '📍 Hier ist die Einfahrt'),
-        h('button', { class: 'btn big primary', onClick: () => saveHere('number') }, '📍 Hier ist der Briefkasten / das Haus'),
-        h('button', { class: 'btn big', onClick: () => (close(), takePhoto()) }, getPhoto(houseKey(street, number)) ? '📷 Foto ersetzen' : '📷 Foto vom Haus'),
+        h('button', { class: 'pill-btn next wide', onClick: () => saveHere('driveway') }, icon('pin', 24), 'Hier ist die Einfahrt'),
+        h('button', { class: 'pill-btn next wide', onClick: () => saveHere('number') }, icon('house', 24), 'Hier ist der Briefkasten / das Haus'),
+        h('button', { class: 'pill-btn outline wide', onClick: () => (close(), takePhoto()) }, icon('camera', 24), getPhoto(houseKey(street, number)) ? 'Foto ersetzen' : 'Foto vom Haus'),
         h('p', { class: 'muted small' }, 'Foto bleibt nur auf diesem iPhone. Bitte keine Personen oder Autokennzeichen fotografieren.'),
         h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
       ),
@@ -222,51 +230,74 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
     openEditor(street, number, getHouseInfo(houseKey(street, number)) ?? emptyHouseInfo(street, number), renderInfo),
   );
 
+  type DirKind = 'right' | 'left' | 'straight' | 'behind' | 'here' | 'wait' | 'unknown';
+  const ICONS: Record<DirKind, IconName> = {
+    right: 'turnRight',
+    left: 'turnLeft',
+    straight: 'straight',
+    behind: 'uturn',
+    here: 'check',
+    wait: 'locate',
+    unknown: 'straight',
+  };
+  const paint = (kind: DirKind, dist: string, label: string) => {
+    dirCard.className = `dircard dir-${kind}`;
+    dirIconEl.replaceChildren(icon(ICONS[kind], 40));
+    distEl.textContent = dist;
+    sideEl.textContent = label;
+  };
+  const kindOf = (side: Side, behind: boolean): DirKind =>
+    behind ? 'behind' : side === 'rechts' ? 'right' : side === 'links' ? 'left' : side === 'geradeaus' ? 'straight' : 'unknown';
+  const sideWord = (side: Side) => (side === 'rechts' ? 'RECHTS' : side === 'links' ? 'LINKS' : side === 'geradeaus' ? 'GERADEAUS' : '');
+
   const renderGuidance = (fix: Fix | null, err?: string) => {
     const t = target();
     deniedEl.hidden = !gps.denied;
+    dirCard.hidden = gps.denied;
     if (gps.denied) {
       // Statt "–": klare Anleitung, wie man den Standort erlaubt
-      distEl.hidden = true;
-      sideEl.replaceChildren();
-      gpsEl.textContent = '';
+      gpsEl.hidden = true;
       driveEl.hidden = true;
       return;
     }
-    distEl.hidden = false;
+    gpsEl.hidden = false;
     if (!fix || !t) {
-      distEl.textContent = t ? '…' : '?';
-      sideEl.replaceChildren();
-      gpsEl.textContent = err ?? (t ? 'Warte auf GPS-Signal …' : '');
+      paint('wait', t ? '…' : '?', t ? 'WARTE AUF GPS' : 'KEINE LAGE BEKANNT');
+      gpsEl.textContent = err ?? 'GPS sucht …';
+      driveEl.hidden = true;
       return;
     }
+    gpsEl.textContent = `GPS ±${Math.round(fix.accuracy)} m`;
     const g = computeGuidance(fix, t, street);
-    distEl.textContent = formatDistance(g.distance);
-    sideEl.className = 'side' + (g.side ? ` side-${g.side}` : '');
-    if (g.distance < 10) sideEl.replaceChildren(h('span', null, 'DA'));
-    else if (!g.side) sideEl.replaceChildren(h('span', { class: 'side-unknown' }, 'Seite: losfahren'));
-    else if (g.side === 'geradeaus') sideEl.replaceChildren(h('span', null, g.behind ? '▼ hinter dir' : '▲ geradeaus'));
-    else
-      sideEl.replaceChildren(
-        h('span', null, g.side === 'links' ? '◀ LINKS' : 'RECHTS ▶'),
-        ...(g.behind ? [h('span', { class: 'behind' }, 'hinter dir')] : []),
-      );
-    gpsEl.textContent = `Luftlinie · GPS ±${Math.round(fix.accuracy)} m${fix.heading === null ? ' · Fahrtrichtung unbekannt' : ''}`;
+    // Zufahrt bekannt: erst zur Einfahrt führen, danach zum Haus
+    let gj: ReturnType<typeof computeGuidance> | null = null;
     if (drive) {
       const [jl, jo] = drive.junction;
-      const gj = computeGuidance(fix, { lat: jl, lon: jo }, street);
+      gj = computeGuidance(fix, { lat: jl, lon: jo }, street);
       // Die Abzweigung liegt auf der Straße; die Seite ergibt sich aus der Richtung der Zufahrt
       const away = drive.line[1] ?? drive.line[0];
-      const gs = computeGuidance(fix, { lat: away[0], lon: away[1] }, street);
-      gj.side = gs.side;
-      const side = gj.side === 'links' ? 'links' : gj.side === 'rechts' ? 'rechts' : gj.side === 'geradeaus' ? 'geradeaus' : '';
-      driveEl.textContent = gj.distance < 10 ? 'Einfahrt: hier abbiegen' : `Einfahrt in ${formatDistance(gj.distance)}${side ? ' ' + side : ''}${gj.behind ? ' (hinter dir)' : ''}`;
-      driveEl.hidden = false;
-      announce(gj.distance, gj.behind, 'EINFAHRT', side);
-    } else {
-      driveEl.hidden = true;
-      announce(g.distance, g.behind, 'HAUS', g.side === 'links' || g.side === 'rechts' ? g.side : '');
+      gj.side = computeGuidance(fix, { lat: away[0], lon: away[1] }, street).side;
     }
+    if (gj && !gj.behind && gj.distance >= 10) {
+      paint(kindOf(gj.side, false), formatDistance(gj.distance), `EINFAHRT ${sideWord(gj.side)}`.trim());
+      driveEl.textContent = `Haus: ${formatDistance(g.distance)}`;
+      driveEl.hidden = false;
+    } else if (g.distance < 10) {
+      paint('here', 'Da', 'DU BIST AM HAUS');
+      driveEl.hidden = true;
+    } else if (gj && gj.distance < 10) {
+      paint(kindOf(gj.side, false), formatDistance(g.distance), `JETZT EINBIEGEN ${sideWord(gj.side)}`.trim());
+      driveEl.hidden = true;
+    } else if (!g.side) {
+      paint('unknown', formatDistance(g.distance), 'LOSFAHREN FÜR SEITE');
+      driveEl.hidden = true;
+    } else {
+      const word = sideWord(g.side);
+      paint(kindOf(g.side, g.behind), formatDistance(g.distance), g.behind ? `HINTER DIR${word && word !== 'GERADEAUS' ? ' · ' + word : ''}` : word);
+      driveEl.hidden = true;
+    }
+    if (gj) announce(gj.distance, gj.behind, 'EINFAHRT', gj.side === 'links' || gj.side === 'rechts' ? gj.side : '');
+    else announce(g.distance, g.behind, 'HAUS', g.side === 'links' || g.side === 'rechts' ? g.side : '');
   };
 
   // Ton + großer Hinweis bei 50 m und 15 m vor Einfahrt bzw. Haus
@@ -304,10 +335,10 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
     unlockAudio();
     show('start', { listen: speechSupported(), streetId: street.id }, false);
   };
-  const soundBtn = h('button', { class: 'btn sound', 'aria-label': 'Ton an/aus' }, soundEnabled() ? '🔔' : '🔕');
+  const soundBtn = h('button', { class: 'round-btn sound', 'aria-label': 'Ton an/aus' }, icon(soundEnabled() ? 'bell' : 'bellOff', 24));
   soundBtn.addEventListener('click', () => {
     setSoundEnabled(!soundEnabled());
-    soundBtn.textContent = soundEnabled() ? '🔔' : '🔕';
+    soundBtn.replaceChildren(icon(soundEnabled() ? 'bell' : 'bellOff', 24));
     unlockAudio();
     toast(soundEnabled() ? 'Ton bei Annäherung an' : 'Ton aus');
   });
@@ -315,26 +346,26 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   root.append(
     h(
       'header',
-      { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('start', {}, false), 'aria-label': 'Zurück' }, '‹ Neu'),
+      { class: 'head' },
+      h('button', { class: 'round-btn', onClick: () => show('start', {}, false), 'aria-label': 'Zurück' }, icon('back', 26)),
       h(
         'div',
-        { class: 'title result-title' },
+        { class: 'head-title' },
         h('div', { class: 'addr' }, `${street.name} ${number}`.trim()),
         h('div', { class: 'addr-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
       ),
       soundBtn,
     ),
     approachEl,
-    h('section', { class: 'guidance' }, deniedEl, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
+    h('section', { class: 'guidance' }, deniedEl, dirCard, h('div', { class: 'tags' }, driveEl, noteEl, placeEl, gpsEl)),
     infoCard,
     photoEl,
     map.root,
     h(
       'footer',
       { class: 'bottombar row' },
-      number ? h('button', { class: 'btn huge here', onClick: hereMenu }, '📍 Hier') : null,
-      h('button', { class: 'btn huge primary', onClick: nextLetter }, speechSupported() ? '🎤 Nächster Brief' : 'Nächster Brief'),
+      number ? h('button', { class: 'pill-btn here', onClick: hereMenu }, icon('pin', 24), 'Hier') : null,
+      h('button', { class: 'pill-btn next', onClick: nextLetter }, speechSupported() ? icon('mic', 24) : null, 'Nächster Brief'),
     ),
   );
   renderInfo();
