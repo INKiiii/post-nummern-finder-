@@ -154,6 +154,31 @@ export class StreetMatcher {
     return projectOnLine(this.proj!.toXY(lat, lon), l);
   }
 
+  /**
+   * Punkt neben der Straße an der aktuellen Position: links/rechts relativ zur Fahrtrichtung,
+   * im Abstand dist (m) von der Straßenmitte. null ohne Straße oder Fahrtrichtung.
+   */
+  besideStreet(m: Match, side: 'left' | 'right', dist: number): [number, number] | null {
+    if (!m.street || m.dir === 0 || !this.proj) return null;
+    const g = this.geometry(m.street);
+    const line = g?.lines[m.line];
+    if (!line || line.length < 2) return null;
+    const { point, tangent } = pointAtS(line, m.s);
+    const dx = tangent[0] * m.dir;
+    const dy = tangent[1] * m.dir;
+    const sign = side === 'left' ? 1 : -1;
+    return this.proj.toLatLon(point[0] - dy * dist * sign, point[1] + dx * dist * sign) as [number, number];
+  }
+
+  /** Straßenpunkt an der aktuellen Position (z. B. für eine Einfahrt). */
+  onStreet(m: Match): [number, number] | null {
+    if (!m.street || !this.proj) return null;
+    const line = this.geometry(m.street)?.lines[m.line];
+    if (!line || line.length < 2) return null;
+    const { point } = pointAtS(line, m.s);
+    return this.proj.toLatLon(point[0], point[1]) as [number, number];
+  }
+
   toXY(lat: number, lon: number): [number, number] {
     return this.proj!.toXY(lat, lon) as [number, number];
   }

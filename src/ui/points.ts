@@ -7,6 +7,7 @@ import { icon } from './icons';
 import { state, savePoint, deletePoint, uid } from '../data';
 import { distanceM, normHouseNumber, snapToBuilding, drivewayFor } from '../core';
 import { gps } from '../gps';
+import { currentMatch, matcher } from '../session';
 import type { Street, UserPoint } from '../types';
 
 export async function setUserPoint(
@@ -131,29 +132,103 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
   );
 }
 
-/** „Hier“: aktuelle GPS-Position als Einfahrt bzw. Haus der gesuchten Nummer speichern. */
+const DIST_KEY = 'hnf-here-dist';
+export const HERE_DISTANCES = [8, 15, 25, 40];
+
+function savedDistance(): number {
+  try {
+    const v = Number(localStorage.getItem(DIST_KEY));
+    return HERE_DISTANCES.includes(v) ? v : 15;
+  } catch {
+    return 15;
+  }
+}
+
+/**
+ * „Hier ist Nr. …“: die gesuchte Nummer an der aktuellen Stelle setzen – links oder rechts
+ * der Straße (relativ zur Fahrtrichtung, im gewählten Abstand) oder genau hier (GPS).
+ * Ein Tippen speichert; danach „Rückgängig“ oben in der Meldung.
+ */
 export function hereMenu(street: Street, number: string, onSaved: () => void) {
   const fix = gps.fix;
+  const m = currentMatch();
   const acc = fix ? Math.round(fix.accuracy) : null;
-  const saveHere = async (kind: 'driveway' | 'number') => {
-    if (!fix) {
+  let dist = savedDistance();
+  const onThisStreet = !!m?.street && m.street.id === street.id;
+  const sidesOk = onThisStreet && m!.dir !== 0;
+
+  const finish = async (kind: 'number' | 'driveway', pos: [number, number] | null, what: string) => {
+    if (!pos) {
       toast('Kein GPS – bitte kurz warten.');
       return;
     }
-    if (fix.accuracy > 30 && !(await confirmBig(`GPS ist gerade ungenau (±${acc} m). Trotzdem speichern?`, 'Speichern'))) return;
-    await setUserPoint(kind, street, number, fix.lat, fix.lon);
+    if (fix && fix.accuracy > 30 && !(await confirmBig(`GPS ist gerade ungenau (±${acc} m). Trotzdem speichern?`, 'Speichern'))) return;
+    // Liegt dort ein Gebäude ohne Nummer, dessen Mitte nehmen
+    const snap = kind === 'number' ? snapToBuilding(street, pos[0], pos[1], 12) : null;
+    const r = await setUserPoint(kind, street, number, snap?.[0] ?? pos[0], snap?.[1] ?? pos[1]);
     close();
-    toast(kind === 'driveway' ? `Einfahrt zu ${number} gespeichert.` : `${street.name} ${number}: Lage gespeichert.`);
     onSaved();
+    toast(`${what} gespeichert (selbst gesetzt).`, 6000, {
+      label: 'Rückgängig',
+      run: async () => {
+        await undoUserPoint(r);
+        onSaved();
+        toast('Rückgängig gemacht.');
+      },
+    });
   };
+
+  const side = (s: 'left' | 'right') => {
+    if (!m || !sidesOk) return;
+    void finish('number', matcher.besideStreet(m, s, dist), `Nr. ${number} ${s === 'left' ? 'links' : 'rechts'}`);
+  };
+  const exact = () => void finish('number', fix ? [fix.lat, fix.lon] : null, `Nr. ${number} genau hier`);
+  const driveway = () => {
+    const p = m && onThisStreet ? matcher.onStreet(m) : fix ? ([fix.lat, fix.lon] as [number, number]) : null;
+    void finish('driveway', p, `Einfahrt zu ${number}`);
+  };
+
+  const distRow = h('div', { class: 'seg' });
+  const renderDist = () =>
+    distRow.replaceChildren(
+      ...HERE_DISTANCES.map((d) =>
+        h(
+          'button',
+          {
+            class: 'seg-btn' + (d === dist ? ' on' : ''),
+            onClick: () => {
+              dist = d;
+              try {
+                localStorage.setItem(DIST_KEY, String(d));
+              } catch {
+                /* egal */
+              }
+              renderDist();
+            },
+          },
+          `${d} m`,
+        ),
+      ),
+    );
+  renderDist();
+
   const close = overlay(
     h(
       'div',
-      { class: 'dialog' },
-      h('h2', null, `${street.name} ${number}`),
-      h('p', { class: 'muted' }, acc !== null ? `Speichert deine aktuelle Position (GPS ±${acc} m).` : 'Warte auf GPS …'),
-      h('button', { class: 'pill-btn next wide', onClick: () => saveHere('driveway') }, icon('pin', 24), 'Hier ist die Einfahrt'),
-      h('button', { class: 'pill-btn next wide', onClick: () => saveHere('number') }, icon('house', 24), 'Hier ist der Briefkasten / das Haus'),
+      { class: 'dialog here-dialog' },
+      h('h2', null, `Hier ist Nr. ${number}`),
+      h('p', { class: 'muted small' }, `${street.name} · ${acc !== null ? `GPS ±${acc} m` : 'warte auf GPS …'}`),
+      h(
+        'div',
+        { class: 'here-row' },
+        h('button', { class: 'pill-btn next here-side', disabled: !sidesOk, onClick: () => side('left') }, '◀ Links'),
+        h('button', { class: 'pill-btn next here-side', disabled: !sidesOk, onClick: () => side('right') }, 'Rechts ▶'),
+      ),
+      sidesOk
+        ? h('div', null, h('div', { class: 'set-label' }, 'Abstand von der Straße'), distRow)
+        : h('p', { class: 'hint' }, onThisStreet ? 'Links/rechts geht erst nach ein paar Metern Fahrt (Richtung unbekannt).' : `Du bist nicht auf der ${street.name}.`),
+      h('button', { class: 'pill-btn outline wide', onClick: exact }, icon('house', 24), 'Genau hier (ich stehe am Briefkasten)'),
+      h('button', { class: 'pill-btn outline wide', onClick: driveway }, icon('pin', 24), 'Hier ist die Einfahrt'),
       h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
   );

@@ -126,3 +126,50 @@ describe('Zustellablauf: Schnelltasten und Sprache', () => {
     expect(matchSpokenStreet('Elbufer Straße')?.name).toBe('Elbuferstraße');
   });
 });
+
+describe('Lücken im Moment des Fundes schließen', () => {
+  it('„Hier ist Nr.“ links/rechts: Punkt auf der richtigen Straßenseite im gewählten Abstand', () => {
+    const proj = makeProjection(SYNTH_ORIGIN[0], SYNTH_ORIGIN[1]);
+    const m = new StreetMatcher(() => index);
+    let last = null as any;
+    for (let x = -640; x <= -600; x += 4) {
+      const [lat, lon] = proj.toLatLon(x, -2);
+      last = m.update({ lat, lon, accuracy: 5, course: 90, speed: 4, time: x });
+    }
+    const left = proj.toXY(...m.besideStreet(last, 'left', 15)!);
+    const right = proj.toXY(...m.besideStreet(last, 'right', 25)!);
+    expect(left[1]).toBeCloseTo(15, 0); // nach Osten: links = Norden
+    expect(right[1]).toBeCloseTo(-25, 0);
+    expect(Math.abs(left[0] - -600)).toBeLessThan(3);
+  });
+
+  it('eigene Punkte haben Vorrang vor den Grunddaten und lassen sich rückgängig machen', async () => {
+    const { state, rebuildIndex } = await import('../src/data');
+    const { setUserPoint, undoUserPoint } = await import('../src/ui/points');
+    const { findHouse } = await import('../src/core');
+    state.packages = townPackages().pkgs.map((pkg: any) => ({ id: pkg.id, entry: {} as any, pkg, size: 0, downloadedAt: 0 }));
+    state.points = [];
+    rebuildIndex();
+    const e = () => [...state.index.streets.values()].find((s) => s.name === 'Elbuferstraße')!;
+    // fehlende Nummer 17 setzen
+    expect(findHouse(e(), '17').estimated).toBe(true);
+    const r1 = await setUserPoint('number', e(), '17', 53.3002, 10.1902);
+    const f17 = findHouse(e(), '17');
+    expect(f17.status).toBe('exact');
+    expect(f17.match?.user).toBe(true);
+    expect(f17.lat).toBeCloseTo(53.3002, 6);
+    // vorhandene Nummer 42 überschreiben (Korrektur) und wieder zurück
+    const orig = findHouse(e(), '42');
+    const r2 = await setUserPoint('number', e(), '42', 53.3005, 10.1905);
+    expect(findHouse(e(), '42').lat).toBeCloseTo(53.3005, 6);
+    await undoUserPoint(r2);
+    expect(findHouse(e(), '42').lat).toBeCloseTo(orig.lat, 6);
+    // erneutes Setzen derselben Nummer ersetzt den eigenen Punkt; Rückgängig stellt ihn wieder her
+    const r3 = await setUserPoint('number', e(), '17', 53.3003, 10.1903);
+    expect(state.points.filter((p) => p.number === '17')).toHaveLength(1);
+    await undoUserPoint(r3);
+    expect(findHouse(e(), '17').lat).toBeCloseTo(53.3002, 6);
+    await undoUserPoint(r1);
+    expect(findHouse(e(), '17').estimated).toBe(true);
+  });
+});
