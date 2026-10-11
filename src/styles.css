@@ -281,12 +281,16 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
 .st { fill: none; stroke: #5a5a5a; stroke-linecap: round; stroke-linejoin: round; }
 .st-focus { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; }
 .st-start { fill: #fff; }
-.st-label { fill: #aaa; font-size: 13px; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 3px; }
-.hn { fill: #ddd; }
-.hn-label { fill: #fff; font-size: 15px; font-weight: 700; paint-order: stroke; stroke: #000; stroke-width: 4px; }
+.st-label { fill: #bbb; font-size: 15px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 5px; stroke-linejoin: round; }
+.hn { fill: #9a9a9a; stroke: #000; stroke-width: 1.5; }
+.hn-label { fill: #fff; font-size: 18px; font-weight: 800; paint-order: stroke; stroke: #000; stroke-width: 6px; stroke-linejoin: round; }
+.hn-strong { font-size: 20px; font-weight: 900; }
+.edge-arrow-head { fill: var(--accent); stroke: #000; stroke-width: 3; stroke-linejoin: round; }
+.edge-pill { fill: #000; stroke: var(--accent); stroke-width: 2; }
+.edge-label { fill: var(--accent); font-size: 18px; font-weight: 900; text-anchor: middle; }
 .hn-user { fill: var(--left); }
 .nb { fill: none; stroke: var(--right); stroke-width: 3; }
-.nb-label { fill: var(--right); font-size: 17px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 4px; }
+.nb-label { fill: var(--right); font-size: 20px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 6px; stroke-linejoin: round; }
 .target { fill: var(--accent); stroke: #000; stroke-width: 3; }
 .target-est { fill: none; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 6 5; }
 .target-label { fill: #000; font-size: 19px; font-weight: 900; text-anchor: middle; }

@@ -5,7 +5,8 @@ import { computeGuidance, formatDistance } from '../src/guidance';
 import { summarize } from '../src/houseinfo';
 import { mergeRecords } from '../src/exportimport';
 import { makeProjection } from '../src/core';
-import type { Street } from '../src/types';
+import type { HouseNumber, Street } from '../src/types';
+import { edgePoint, followAhead, forcedLabels } from '../src/maplabels';
 
 describe('Zahlwörter', () => {
   it.each([
@@ -135,5 +136,43 @@ describe('Haus-Infos', () => {
     expect(r.updated).toBe(1);
     expect(r.result.find((x) => x.key === 'a')!.updated).toBe(9);
     expect(r.result.find((x) => x.key === 'b')!.updated).toBe(5);
+  });
+});
+
+describe('Kartenbeschriftung und Zoom', () => {
+  const num = (label: string): HouseNumber => {
+    const m = /^(\d+)([a-z]?)$/.exec(label)!;
+    return { label, norm: label, num: +m[1], suffix: m[2], to: null, lat: 0, lon: 0, source: 'osm', plz: '' };
+  };
+  const all = Array.from({ length: 80 }, (_, i) => num(String(i + 1)));
+
+  it('beschriftet Ziel und je 3 Nachbarn derselben Straßenseite', () => {
+    const f = [...forcedLabels(all, '42')].map((n) => n.label).sort((a, b) => +a - +b);
+    expect(f).toEqual(['36', '38', '40', '42', '44', '46', '48']);
+  });
+  it('fehlende Zielnummer: trotzdem die Nachbarn', () => {
+    const list = all.filter((n) => n.label !== '17');
+    const f = [...forcedLabels(list, '17')].map((n) => n.label).sort((a, b) => +a - +b);
+    expect(f).toEqual(['11', '13', '15', '19', '21', '23']);
+  });
+  it('Zusatz 12a zählt mit 12 als eine Position', () => {
+    const list = [...all, num('12a')];
+    const f = [...forcedLabels(list, '14')].map((n) => n.label);
+    expect(f).toContain('12');
+    expect(f).toContain('12a');
+    expect(f).toContain('8');
+    expect(f).not.toContain('6');
+  });
+  it('zoomt bei Annäherung heran, höchstens 120 m voraus', () => {
+    expect(followAhead(5000)).toBe(120);
+    expect(followAhead(Infinity)).toBe(120);
+    expect(followAhead(60)).toBeCloseTo(85);
+    expect(followAhead(5)).toBe(35);
+  });
+  it('setzt den Randpfeil auf den Kartenrand', () => {
+    expect(edgePoint([200, 300], 0, 400, 400, 30)).toEqual([200, 30]);
+    const [x, y] = edgePoint([200, 300], 90, 400, 400, 30);
+    expect(x).toBeCloseTo(370);
+    expect(y).toBeCloseTo(300);
   });
 });

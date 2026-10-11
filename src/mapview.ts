@@ -4,7 +4,8 @@
 // Zwei Ansichten: "Fahrtrichtung oben" (gedreht, leicht geneigt) und "Norden oben".
 // Die Knöpfe liegen in einer eigenen Leiste unter der Karte und verdecken nichts.
 
-import { makeProjection } from './core';
+import { makeProjection, distanceM, normHouseNumber } from './core';
+import { AHEAD_MAX, LABEL_NEAR_CAR, edgePoint, followAhead, forcedLabels } from './maplabels';
 import type { HouseNumber, Index, Street } from './types';
 import type { Fix } from './gps';
 
@@ -64,6 +65,8 @@ export class MapView {
   private rot = 0; // Kartendrehung in Grad (Fahrtrichtung oben)
   private mode: MapMode = loadMode();
   private auto = true;
+  private following = false;
+  private prevScale = 2.5;
   private raf = 0;
   private data: MapData = { index: null, focus: null, target: null, neighbors: [], user: null, draft: null, driveway: null };
   private pointers = new Map<number, { x: number; y: number }>();
@@ -260,51 +263,53 @@ export class MapView {
   }
 
   /**
-   * Zeigt Ziel, eigene Position (bis 2,5 km) und Einfahrt. Nur das Ziel: etwa 160 m Ausschnitt.
-   * Iterativ, weil die Neigung nicht linear ist.
+   * Automatische Ansicht.
+   * Mit GPS (Folgemodus): Auto im unteren Drittel, höchstens ~120 m voraus, beim Annähern
+   * enger. Haus und Einfahrt im Nahbereich bleiben immer im Bild; weiter entfernte Ziele
+   * zeigt ein Pfeil am Rand (siehe render), statt herauszuzoomen.
+   * Ohne GPS: etwa 160 m um das Ziel.
    */
   private autoFit() {
     const { target, user, focus, driveway } = this.data;
     const { w, h } = this.size();
-    const pts: [number, number][] = [];
-    if (target) pts.push(this.proj.toXY(target.lat, target.lon));
-    if (driveway?.line.length) pts.push(this.proj.toXY(driveway.line[0][0], driveway.line[0][1]));
-    if (user && (!target || Math.hypot(...this.proj.toXY(user.lat, user.lon)) < 2500)) pts.push(this.proj.toXY(user.lat, user.lon));
-    if (!pts.length && focus?.bbox) {
-      pts.push(this.proj.toXY(focus.bbox[0], focus.bbox[1]), this.proj.toXY(focus.bbox[2], focus.bbox[3]));
-    }
-    if (!pts.length) return;
-    const maxScale = 4;
-    const singleScale = Math.min(w, h) / 160;
-    const margin = { l: 50, r: 50, t: 60, b: 50 };
-    if (pts.length === 1 || pts.every((p) => Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) < 30)) {
-      this.scale = Math.min(maxScale, singleScale);
-      this.cx = pts[0][0];
-      this.cy = pts[0][1];
-      // Im Fahrtrichtungs-Modus etwas unter der Mitte, damit voraus mehr Platz bleibt
-      this.pin(pts[0][0], pts[0][1], w / 2, this.tilted ? h * 0.6 : h / 2);
+    const T = target ? this.proj.toXY(target.lat, target.lon) : null;
+    const J = driveway?.line.length ? this.proj.toXY(driveway.line[0][0], driveway.line[0][1]) : null;
+    if (user && (T || focus)) {
+      const U = this.proj.toXY(user.lat, user.lon);
+      const dist = T ? Math.hypot(T[0] - U[0], T[1] - U[1]) : Infinity;
+      // Fahrtrichtung oben: Auto im unteren Drittel. Norden oben: Auto in der Mitte,
+      // dann reicht die Sicht in jede Richtung etwa "ahead" Meter.
+      const userY = this.tilted ? h * 0.75 : h * 0.5;
+      // Maßstab so, dass vom Auto bis zum oberen Rand "ahead" Meter liegen
+      this.scale = 1;
+      this.pin(U[0], U[1], w / 2, userY);
+      const top = this.screenToWorld(w / 2, 0);
+      const span = Math.hypot(top[0] - U[0], top[1] - U[1]);
+      const wanted = Math.min(12, Math.max(0.3, span / followAhead(dist)));
+      // Sanft annähern, damit die Karte beim Fahren nicht springt
+      this.scale = this.following ? this.prevScale + (wanted - this.prevScale) * 0.5 : wanted;
+      this.pin(U[0], U[1], w / 2, userY);
+      // Nahbereich: Haus (auch in zweiter Reihe) und Einfahrt müssen sichtbar sein
+      const must = [T, J].filter((p): p is [number, number] => !!p && Math.hypot(p[0] - U[0], p[1] - U[1]) <= AHEAD_MAX + 40);
+      const m = 30;
+      for (let i = 0; i < 25; i++) {
+        const out = must.some(([x, y]) => {
+          const [sx, sy] = this.worldToScreen(x, y);
+          return sx < m || sx > w - m || sy < m || sy > h - m;
+        });
+        if (!out) break;
+        this.scale *= 0.88;
+        this.pin(U[0], U[1], w / 2, userY);
+      }
+      this.following = true;
+      this.prevScale = this.scale;
       return;
     }
-    this.cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
-    this.cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
-    for (let i = 0; i < 30; i++) {
-      const sp = pts.map(([x, y]) => this.worldToScreen(x, y));
-      const minX = Math.min(...sp.map((p) => p[0]));
-      const maxX = Math.max(...sp.map((p) => p[0]));
-      const minY = Math.min(...sp.map((p) => p[1]));
-      const maxY = Math.max(...sp.map((p) => p[1]));
-      // Mitte der Punkte in die Mitte des freien Bereichs schieben
-      const [wx, wy] = this.screenToWorld((minX + maxX) / 2, (minY + maxY) / 2);
-      this.pin(wx, wy, (margin.l + w - margin.r) / 2, (margin.t + h - margin.b) / 2);
-      const availW = w - margin.l - margin.r;
-      const availH = h - margin.t - margin.b;
-      const bw = maxX - minX;
-      const bh = maxY - minY;
-      if (bw > availW || bh > availH) this.scale *= 0.85;
-      else if (bw < availW * 0.7 && bh < availH * 0.7 && this.scale < maxScale) this.scale = Math.min(maxScale, this.scale * 1.15);
-      else break;
-      this.scale = Math.max(0.03, this.scale);
-    }
+    this.following = false;
+    const P = T ?? J ?? (focus?.bbox ? this.proj.toXY((focus.bbox[0] + focus.bbox[2]) / 2, (focus.bbox[1] + focus.bbox[3]) / 2) : null);
+    if (!P) return;
+    this.scale = Math.min(4, Math.min(w, h) / 160);
+    this.pin(P[0], P[1], w / 2, h / 2);
   }
 
   private zoom(f: number, sx?: number, sy?: number) {
@@ -409,8 +414,9 @@ export class MapView {
     // Beschriftungen ohne Überlappung: belegte Rechtecke merken, Überlappendes weglassen
     const placed: number[][] = [];
     const reserve = (x0: number, y0: number, x1: number, y1: number) => placed.push([x0, y0, x1, y1]);
-    const free = (x0: number, y0: number, x1: number, y1: number) =>
-      !placed.some((b) => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1]);
+    const hits = (list: number[][], x0: number, y0: number, x1: number, y1: number) =>
+      list.some((b) => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1]);
+    const free = (x0: number, y0: number, x1: number, y1: number) => !hits(placed, x0, y0, x1, y1);
     const textBox = (x: number, y: number, text: string, size: number, anchor: 'start' | 'middle') => {
       const tw = text.length * size * 0.6;
       const x0 = anchor === 'middle' ? x - tw / 2 : x;
@@ -430,7 +436,7 @@ export class MapView {
     const east = Math.max(...corners.map((c) => c[1])) + 0.0015;
     const { index, focus, target, neighbors, user, draft, driveway } = this.data;
 
-    // Vorrang: Ziel, Einfahrt, Nachbarn, Postauto
+    // Vorrang: Ziel, Einfahrt, Nachbarn, Postauto – Beschriftungen weichen ihnen aus
     if (target) {
       const [x, y] = toS(target.lat, target.lon);
       reserve(x - 24, y - 24, x + 24, y + 24);
@@ -491,24 +497,46 @@ export class MapView {
     if (driveway && driveway.line.length >= 2) {
       el('path', { d: pathOf(driveway.line), class: 'drive' + (driveway.user ? ' drive-user' : ''), 'stroke-width': Math.max(4, streetW * 0.7) }, svg);
     }
+    const forced = focus && target ? forcedLabels(focus.numbers, target.label) : new Set<HouseNumber>();
     if (focus) {
+      // Ausgedünnt: Ziel + je 3 Nachbarn immer, sonst nur Punkte; im Umkreis von 40 m
+      // um das Auto alle sichtbaren Nummern (ohne Überlappung).
+      const gDots = el('g', {}, svg);
       const gNum = el('g', {}, svg);
-      const showLabels = S > 0.9;
+      // Rechts vom Punkt, sonst links. Pflicht-Beschriftungen weichen nur Ziel/Einfahrt/Auto aus.
+      const label = (n: HouseNumber, x: number, y: number, strong: boolean) => {
+        const size = strong ? 20 : 18;
+        const tw = n.label.length * size * 0.6;
+        const spots = [
+          { tx: x + 7, ty: y + 6, anchor: 'start', box: [x + 5, y + 6 - size, x + 9 + tw, y + 9] },
+          { tx: x - 7, ty: y + 6, anchor: 'end', box: [x - 9 - tw, y + 6 - size, x - 5, y + 9] },
+          { tx: x, ty: y - 8, anchor: 'middle', box: [x - tw / 2 - 2, y - 8 - size, x + tw / 2 + 2, y - 5] },
+          { tx: x, ty: y + 8 + size, anchor: 'middle', box: [x - tw / 2 - 2, y + 6, x + tw / 2 + 2, y + 11 + size] },
+        ];
+        // Keine Überlappung mit anderen Beschriftungen. Pflicht-Nummern ohne freien Platz
+        // erscheinen beim Heranzoomen (die Karte zoomt bei Annäherung von selbst).
+        const spot = spots.find((p) => free(p.box[0], p.box[1], p.box[2], p.box[3]));
+        if (!spot) return;
+        reserve(spot.box[0], spot.box[1], spot.box[2], spot.box[3]);
+        const t = el('text', { x: spot.tx, y: spot.ty, 'text-anchor': spot.anchor, class: `hn-label${strong ? ' hn-strong' : ''}${n.user ? ' hn-user' : ''}` }, gNum);
+        t.textContent = n.label;
+      };
+      const targetNorm = target ? normHouseNumber(target.label) : '';
+      const near: [HouseNumber, number, number][] = [];
       for (const n of focus.numbers) {
         const [x, y] = toS(n.lat, n.lon);
         if (!visible(x, y)) continue;
-        el('circle', { cx: x, cy: y, r: showLabels ? 4 : 3, class: n.user ? 'hn hn-user' : 'hn' }, gNum);
-        const box = textBox(x + 6, y + 5, n.label, 15, 'start');
-        if (showLabels && free(...box)) {
-          reserve(...box);
-          const t = el('text', { x: x + 6, y: y + 5, class: n.user ? 'hn-label hn-user' : 'hn-label' }, gNum);
-          t.textContent = n.label;
-        }
+        el('circle', { cx: x, cy: y, r: 4, class: n.user ? 'hn hn-user' : 'hn' }, gDots);
+        if (n.norm === targetNorm) continue; // steht schon in der Zielmarkierung
+        if (forced.has(n)) label(n, x, y, true);
+        else if (user && distanceM(user.lat, user.lon, n.lat, n.lon) <= LABEL_NEAR_CAR) near.push([n, x, y]);
       }
+      for (const [n, x, y] of near) label(n, x, y, false);
     }
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);
       el('circle', { cx: x, cy: y, r: 11, class: 'nb' }, svg);
+      if (forced.has(n)) continue; // schon beschriftet
       const t = el('text', { x, y: y - 16, class: 'nb-label' }, svg);
       t.textContent = n.label;
     }
@@ -546,6 +574,38 @@ export class MapView {
         el('rect', { x: -7, y: -12, width: 14, height: 7, rx: 2, class: 'car-window' }, g);
         el('path', { d: 'M0 -30 L8 -20 L-8 -20 Z', class: 'car-arrow' }, g);
       }
+    }
+    // Ziel außerhalb der Ansicht: Pfeil am Rand mit Entfernung (Einfahrt zuerst, falls vorhanden)
+    const inset = 34;
+    const offscreen = (lat: number, lon: number) => {
+      const [x, y] = toS(lat, lon);
+      return !(x > 8 && x < w - 8 && y > 8 && y < h - 8);
+    };
+    let arrow: { lat: number; lon: number; text: string } | null = null;
+    const J0 = driveway?.line[0];
+    if (J0 && offscreen(J0[0], J0[1])) arrow = { lat: J0[0], lon: J0[1], text: 'E' };
+    else if (target && offscreen(target.lat, target.lon)) arrow = { lat: target.lat, lon: target.lon, text: target.label };
+    if (arrow) {
+      const from = user ? toS(user.lat, user.lon) : ([w / 2, h / 2] as [number, number]);
+      const ref = user ? this.proj.toXY(user.lat, user.lon) : this.screenToWorld(w / 2, h / 2);
+      const [ax0, ay0] = this.proj.toXY(arrow.lat, arrow.lon);
+      const r = (this.rot * Math.PI) / 180;
+      const dx = ax0 - ref[0];
+      const dy = ay0 - ref[1];
+      const angle = (Math.atan2(dx * Math.cos(r) - dy * Math.sin(r), dx * Math.sin(r) + dy * Math.cos(r)) * 180) / Math.PI;
+      const [px, py] = edgePoint(from, angle, w, h, inset);
+      const dist = user ? distanceM(user.lat, user.lon, arrow.lat, arrow.lon) : null;
+      const g = el('g', { class: 'edge-arrow', transform: `translate(${px.toFixed(1)} ${py.toFixed(1)})` }, svg);
+      el('path', { d: 'M0 -22 L16 8 L0 0 L-16 8 Z', transform: `rotate(${angle.toFixed(1)})`, class: 'edge-arrow-head' }, g);
+      const text = dist === null ? arrow.text : `${arrow.text} · ${dist >= 1000 ? (dist / 1000).toFixed(1).replace('.', ',') + ' km' : Math.round(dist / 5) * 5 + ' m'}`;
+      // Beschriftung zur Kartenmitte hin versetzt, damit sie im Bild bleibt
+      const a = (angle * Math.PI) / 180;
+      const lx = Math.min(w - 70, Math.max(70, px - Math.sin(a) * 38));
+      const ly = Math.min(h - 14, Math.max(28, py + Math.cos(a) * 38));
+      const tw = text.length * 11 + 18;
+      el('rect', { x: lx - px - tw / 2, y: ly - py - 20, width: tw, height: 30, rx: 15, class: 'edge-pill' }, g);
+      const t = el('text', { x: lx - px, y: ly - py + 2, class: 'edge-label' }, g);
+      t.textContent = text;
     }
     // Maßstab (am unteren Rand gemessen) als Balken in der Leiste
     const [ax, ay] = this.screenToWorld(w / 2 - 50, h - 2);
