@@ -12,6 +12,7 @@ import { MapView } from '../mapview';
 import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../houseinfo';
 import { remember } from '../recents';
 import { speechSupported } from '../voice';
+import { locationDeniedBox } from './location';
 import type { FindResult, Street } from '../types';
 
 function statusNote(res: FindResult, number: string): string {
@@ -54,6 +55,8 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const noteEl = h('div', { class: 'note' });
   const placeEl = h('div', { class: 'note place-note' });
   const driveEl = h('div', { class: 'drive-guide' });
+  const deniedEl = locationDeniedBox();
+  deniedEl.hidden = true;
   let drive: ReturnType<typeof drivewayFor> = null;
   const infoCard = h('button', { class: 'info-card' });
   const map = new MapView();
@@ -104,10 +107,20 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
 
   const renderGuidance = (fix: Fix | null, err?: string) => {
     const t = target();
-    if (!fix || !t) {
-      distEl.textContent = t ? '–' : '?';
+    deniedEl.hidden = !gps.denied;
+    if (gps.denied) {
+      // Statt "–": klare Anleitung, wie man den Standort erlaubt
+      distEl.hidden = true;
       sideEl.replaceChildren();
-      gpsEl.textContent = err ?? (t ? 'Warte auf GPS …' : '');
+      gpsEl.textContent = '';
+      driveEl.hidden = true;
+      return;
+    }
+    distEl.hidden = false;
+    if (!fix || !t) {
+      distEl.textContent = t ? '…' : '?';
+      sideEl.replaceChildren();
+      gpsEl.textContent = err ?? (t ? 'Warte auf GPS-Signal …' : '');
       return;
     }
     const g = computeGuidance(fix, t, street);
@@ -171,7 +184,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         h('div', { class: 'addr-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
       ),
     ),
-    h('section', { class: 'guidance' }, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
+    h('section', { class: 'guidance' }, deniedEl, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
     infoCard,
     map.root,
     h(

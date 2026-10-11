@@ -3,7 +3,7 @@ import { parseGermanNumber, parseSpokenAddress } from '../src/speechparse';
 import { nameWarning } from '../src/namecheck';
 import { computeGuidance, formatDistance } from '../src/guidance';
 import { summarize } from '../src/houseinfo';
-import { mergeRecords } from '../src/exportimport';
+import { mergeRecords, backupDue } from '../src/exportimport';
 import { makeProjection } from '../src/core';
 import type { HouseNumber, Street } from '../src/types';
 import { edgePoint, followAhead, forcedLabels } from '../src/maplabels';
@@ -174,5 +174,15 @@ describe('Kartenbeschriftung und Zoom', () => {
     const [x, y] = edgePoint([200, 300], 90, 400, 400, 30);
     expect(x).toBeCloseTo(370);
     expect(y).toBeCloseTo(300);
+  });
+});
+
+describe('Datensicherung', () => {
+  const day = 24 * 3600 * 1000;
+  it('ist fällig, wenn nie oder vor mehr als 14 Tagen gesichert', () => {
+    const now = Date.UTC(2026, 9, 11);
+    expect(backupDue(null, now)).toBe(true);
+    expect(backupDue(now - 15 * day, now)).toBe(true);
+    expect(backupDue(now - 13 * day, now)).toBe(false);
   });
 });

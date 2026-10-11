@@ -16,6 +16,8 @@ type Listener = (fix: Fix | null, error?: string) => void;
 class Gps {
   fix: Fix | null = null;
   error: string | null = null;
+  /** Standortzugriff wurde verweigert (Nutzer muss ihn in den Einstellungen erlauben) */
+  denied = false;
   private watchId: number | null = null;
   private listeners = new Set<Listener>();
   private anchor: { lat: number; lon: number } | null = null;
@@ -29,7 +31,8 @@ class Gps {
     this.watchId = navigator.geolocation.watchPosition(
       (p) => this.onPosition(p),
       (e) => {
-        this.error = e.code === e.PERMISSION_DENIED ? 'Standortzugriff verweigert' : 'Kein GPS-Signal';
+        this.denied = e.code === e.PERMISSION_DENIED;
+        this.error = this.denied ? 'Standortzugriff verweigert' : 'Kein GPS-Signal';
         this.emit();
       },
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 },
@@ -52,6 +55,7 @@ class Gps {
   private onPosition(p: GeolocationPosition) {
     const { latitude: lat, longitude: lon, accuracy, heading, speed } = p.coords;
     this.error = null;
+    this.denied = false;
     // Kurs vom GPS nur bei Fahrt verlässlich; sonst aus der Bewegung (> 8 m) berechnen.
     if (heading !== null && Number.isFinite(heading) && speed !== null && speed > 1.5) {
       this.heading = heading;

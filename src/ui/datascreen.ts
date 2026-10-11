@@ -3,7 +3,7 @@
 import { h, toast, confirmBig, formatDate } from './dom';
 import { show } from './app';
 import { state, deletePoint, deleteUserStreet } from '../data';
-import { exportUserData, importUserData } from '../exportimport';
+import { backupState, backupUserData, importUserData } from '../exportimport';
 import { loadHouseInfos } from '../houseinfo';
 
 export function dataScreen(root: HTMLElement) {
@@ -69,23 +69,17 @@ export function dataScreen(root: HTMLElement) {
     );
   };
 
+  const backupInfo = h('p', { class: 'hint' });
+  const renderBackup = async () => {
+    const b = await backupState();
+    backupInfo.textContent = b.last ? `Letzte Sicherung: ${formatDate(b.last)}` : 'Noch nie gesichert.';
+    backupInfo.classList.toggle('warn-text', b.due);
+  };
   const doExport = async () => {
-    const data = await exportUserData();
-    const json = JSON.stringify(data, null, 1);
-    const name = `hausnummern-infos-${new Date().toISOString().slice(0, 10)}.json`;
-    const file = new File([json], name, { type: 'application/json' });
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: 'Haus-Infos' });
-        return;
-      } catch (e) {
-        if ((e as Error).name === 'AbortError') return;
-      }
+    if (await backupUserData()) {
+      toast('Haus-Infos gesichert.');
+      void renderBackup();
     }
-    const a = h('a', { href: URL.createObjectURL(file), download: name });
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => (URL.revokeObjectURL(a.href), a.remove()), 1000);
   };
 
   const fileInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true }) as HTMLInputElement;
@@ -116,16 +110,18 @@ export function dataScreen(root: HTMLElement) {
       'div',
       { class: 'page' },
       counts,
-      h('p', { class: 'hint' }, 'Alles bleibt auf diesem Gerät. Zum Teilen mit Kollegen im selben Gebiet exportieren und dort importieren. Bei gleichen Einträgen gewinnt der neuere.'),
+      h('p', { class: 'hint' }, 'Alles bleibt auf diesem Gerät. „Haus-Infos sichern“ erzeugt eine Datei: in Dateien/Cloud speichern oder an Kollegen im selben Gebiet schicken. Dort mit „Importieren“ einlesen; bei gleichen Einträgen gewinnt der neuere.'),
       h('div', { class: 'row' },
-        h('button', { class: 'btn big primary', onClick: doExport }, '⇪ Exportieren'),
+        h('button', { class: 'btn big primary', onClick: doExport }, '⇪ Haus-Infos sichern'),
         h('button', { class: 'btn big', onClick: () => fileInput.click() }, '⇩ Importieren'),
       ),
+      backupInfo,
       fileInput,
       lists,
     ),
   );
   void render();
+  void renderBackup();
 }
 
 function sourcesList() {

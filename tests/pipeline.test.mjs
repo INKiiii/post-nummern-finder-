@@ -7,7 +7,7 @@ import { writePbf } from '../scripts/lib/pbf-writer.mjs';
 import { makeSyntheticTown } from '../scripts/lib/synthetic.mjs';
 import { loadOsmPbf } from '../scripts/lib/sources/osm-pbf.mjs';
 import { mergeAddresses, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
-import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet } from '../src/shared/lookup.js';
+import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets } from '../src/shared/lookup.js';
 import { distanceM } from '../src/shared/geo.js';
 
 let pkgs;
@@ -174,5 +174,16 @@ describe('Suche und Lage (App-Logik)', () => {
     expect(d.line[0]).toEqual([jl, jo]);
     expect(d.line[1]).toEqual([r.lat, r.lon]);
   });
-});
 
+  it('schlägt die nächstgelegene Straße vor', () => {
+    const idx = buildIndex(pkgs);
+    const near = (x, y) => nearestStreets(idx, ...town.proj.toLatLon(x, y), 50, 2).map((r) => r.street.name);
+    expect(near(-600, -4)).toEqual(['Elbuferstraße']);
+    expect(near(-300, 200)[0]).toBe('Blumenstraße');
+    // An der Kreuzung beide, nächste zuerst
+    expect(near(-295, 12)).toEqual(['Blumenstraße', 'Elbuferstraße']);
+    // Straße ohne Geometrie: über die Hausnummern
+    expect(near(-590, 125)[0]).toBe('Am Deich');
+    expect(near(-600, 600)).toEqual([]);
+  });
+});

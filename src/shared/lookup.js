@@ -379,3 +379,32 @@ export function distanceToStreet(street, lat, lon) {
   }
   return best;
 }
+
+/**
+ * Straßen in der Nähe eines Standorts, nächste zuerst (für den Vorschlag auf dem Startscreen).
+ * Abstand zur Straßenlinie, bei Straßen ohne Geometrie zur nächsten Hausnummer.
+ * @returns {{street:object, dist:number}[]}
+ */
+export function nearestStreets(index, lat, lon, maxM = 60, limit = 3) {
+  const pad = maxM / 111320;
+  const padLon = pad / Math.cos((lat * Math.PI) / 180);
+  const out = [];
+  for (const s of index.streets.values()) {
+    const b = s.bbox;
+    if (!b || lat < b[0] - pad || lat > b[2] + pad || lon < b[1] - padLon || lon > b[3] + padLon) continue;
+    let d = distanceToStreet(s, lat, lon);
+    if (d === null) {
+      for (const n of s.numbers) {
+        const x = (n.lon - lon) * 111320 * Math.cos((lat * Math.PI) / 180);
+        const y = (n.lat - lat) * 111320;
+        const dn = Math.hypot(x, y);
+        if (d === null || dn < d) d = dn;
+      }
+    }
+    if (d !== null && d <= maxM) out.push({ street: s, dist: d });
+  }
+  // Gleiche Straße (Name) nur einmal, nächste zuerst
+  out.sort((a, b) => a.dist - b.dist);
+  const seen = new Set();
+  return out.filter((x) => !seen.has(x.street.norm) && seen.add(x.street.norm)).slice(0, limit);
+}

@@ -94,3 +94,49 @@ export async function importUserData(json: string) {
   rebuildIndex();
   return { houseinfo: hi, points: pts, streets: sts, namesRemoved: data.namesRemoved };
 }
+
+const BACKUP_KEY = 'lastBackup';
+export const BACKUP_DAYS = 14;
+
+/**
+ * "Haus-Infos sichern": eigene Daten als JSON-Datei teilen (Teilen-Menü, z. B. an sich selbst
+ * schicken oder in Dateien speichern) oder herunterladen. Merkt sich das Datum.
+ * @returns true, wenn gesichert (nicht bei Abbruch im Teilen-Menü)
+ */
+export async function backupUserData(): Promise<boolean> {
+  const data = await exportUserData();
+  const json = JSON.stringify(data, null, 1);
+  const name = `haus-infos-sicherung-${new Date().toISOString().slice(0, 10)}.json`;
+  const file = new File([json], name, { type: 'application/json' });
+  let done = false;
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'Haus-Infos sichern' });
+      done = true;
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return false;
+    }
+  }
+  if (!done) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => (URL.revokeObjectURL(a.href), a.remove()), 1000);
+  }
+  await db.kvSet(BACKUP_KEY, Date.now());
+  return true;
+}
+
+/** Stand der Sicherung: wann zuletzt, ob fällig (älter als 14 Tage oder nie) und ob es Daten gibt. */
+export async function backupState(now = Date.now()) {
+  const last = await db.kvGet<number | null>(BACKUP_KEY, null);
+  const infos = await loadHouseInfos();
+  const count = infos.size + state.points.length + state.ustreets.length;
+  return { last, count, due: backupDue(last, now) };
+}
+
+export function backupDue(last: number | null, now = Date.now()): boolean {
+  return last === null || now - last > BACKUP_DAYS * 24 * 3600 * 1000;
+}

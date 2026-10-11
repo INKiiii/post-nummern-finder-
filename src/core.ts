@@ -21,6 +21,13 @@ export const drivewayFor = L.drivewayFor as unknown as (
   input: string,
   result?: FindResult,
 ) => { line: [number, number][]; junction: [number, number]; user: boolean; pointId?: string } | null;
+export const nearestStreets = L.nearestStreets as unknown as (
+  index: Index,
+  lat: number,
+  lon: number,
+  maxM?: number,
+  limit?: number,
+) => { street: Street; dist: number }[];
 export const distanceToStreet = L.distanceToStreet as unknown as (street: Street, lat: number, lon: number) => number | null;
 
 export const normStreet: (s: string) => string = N.normStreet;

@@ -364,3 +364,32 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
 .list-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .list-row > span:first-child { flex: 1; font-weight: 700; }
 [hidden] { display: none !important; }
+
+/* ---------- Startscreen: Status, Straßenvorschlag, Standort ---------- */
+.status-row { display: flex; gap: 8px; padding: 8px 12px 0; }
+.badge-ok, .badge-warn {
+  font-size: 16px; font-weight: 800; padding: 4px 12px; border-radius: 999px;
+}
+.badge-ok { color: var(--ok); border: 2px solid var(--ok); }
+.badge-warn { color: var(--accent); border: 2px solid var(--accent); }
+.near { display: flex; flex-direction: column; gap: 8px; margin: 10px 12px 0; }
+.near:empty { display: none; }
+.near-main {
+  display: flex; flex-direction: column; align-items: flex-start; text-align: left;
+  min-height: 76px; border: 3px solid var(--ok); background: #0c2617; padding: 8px 16px;
+}
+.near-main .near-name { font-size: 28px; font-weight: 900; }
+.near-alt { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: 10px; align-items: center; text-align: left; }
+.near-alt .near-name { font-size: 20px; }
+.near-meta { font-size: 15px; color: var(--muted); font-weight: 700; }
+.loc-denied {
+  border: 3px solid var(--danger); background: #2a0b0b; border-radius: var(--radius);
+  padding: 12px 14px; margin: 4px 0;
+}
+.loc-denied[hidden] { display: none; }
+.loc-title { font-size: 21px; font-weight: 900; color: #fff; }
+.loc-steps { font-size: 17px; margin-top: 6px; color: #ffd0d0; font-weight: 700; }
+.loc-note { font-size: 15px; margin-top: 6px; color: var(--muted); }
+.loc-denied.compact .loc-title { font-size: 19px; }
+.warn-text { color: var(--accent); font-weight: 800; }
+.screen-start .banner { margin-top: 8px; }
