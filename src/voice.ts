@@ -2,7 +2,8 @@
 
 import { listenOnce, speechSupported, stopListening } from './speech';
 import { parseSpokenAddress } from './speechparse';
-import { editDistance, normStreet, searchStreets } from './core';
+import { editDistance, normStreet, preferNearby, searchStreets } from './core';
+import { gps } from './gps';
 import { state } from './data';
 import { h, overlay, toast } from './ui/dom';
 import type { Street } from './types';
@@ -13,7 +14,8 @@ export { speechSupported };
 export function matchSpokenStreet(spoken: string): Street | null {
   const q = normStreet(spoken);
   if (q.length < 3) return null;
-  const cands = searchStreets(state.index, spoken, 5);
+  // Gleichnamige Straßen: die dem Standort nächste zuerst
+  const cands = preferNearby(searchStreets(state.index, spoken, 8), gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
   for (const s of cands) {
     if (s.norm === q || s.norm.startsWith(q) || q.startsWith(s.norm)) return s;
     const d = editDistance(q, s.norm, 4);

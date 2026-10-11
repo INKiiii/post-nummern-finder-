@@ -238,12 +238,22 @@ export function bestStreetMatch(index, spoken) {
  * @returns {{status:'exact'|'range'|'base'|'interpolated'|'extrapolated'|'single'|'street'|'none',
  *   lat:number, lon:number, estimated:boolean, match?:object, neighbors:object[]}}
  */
-export function findHouse(street, input) {
+export function findHouse(street, input, near = null) {
   const p = parseHouseNumber(input);
   const nums = street.numbers;
   // Eigene Punkte haben Vorrang (z. B. Korrektur einer falsch eingetragenen Nummer)
   const same = (n) => n.norm === p.norm || (p.num !== null && n.num === p.num && n.suffix === p.suffix);
-  const exact = nums.find((n) => n.user && same(n)) ?? nums.find((n) => n.norm === p.norm) ?? nums.find(same);
+  const users = nums.filter((n) => n.user && same(n));
+  const exactNorm = nums.filter((n) => n.norm === p.norm);
+  const pool = users.length ? users : exactNorm.length ? exactNorm : nums.filter(same);
+  // Sicherheitsnetz: dieselbe Nummer mehrfach weit auseinander (z. B. zwei Gemeinden mit
+  // eigener Nummernfolge) -> die nächstgelegene nehmen und das melden.
+  let exact = pool[0];
+  let ambiguous = false;
+  if (pool.length > 1) {
+    ambiguous = pool.some((a) => pool.some((b) => a !== b && distanceApprox(a, b) > 150));
+    if (near) exact = pool.reduce((best, n) => (distanceApprox(n, { lat: near[0], lon: near[1] }) < distanceApprox(best, { lat: near[0], lon: near[1] }) ? n : best));
+  }
   if (exact) {
     // Nummern aus OSM-Interpolationslinien sind nur ungefähr verortet
     const approx = exact.source === 'osm-interp';
@@ -254,6 +264,7 @@ export function findHouse(street, input) {
       lon: snapped?.[1] ?? exact.lon,
       estimated: approx,
       snapped: !!snapped,
+      ambiguous,
       match: exact,
       neighbors: [],
     };
@@ -462,4 +473,31 @@ export function snapToBuilding(street, lat, lon, maxM = 25) {
     bestD = d;
   }
   return best;
+}
+
+/** Ungefährer Abstand in Metern zwischen zwei Punkten {lat, lon}. */
+function distanceApprox(a, b) {
+  const kx = 111320 * Math.cos((a.lat * Math.PI) / 180);
+  return Math.hypot((a.lat - b.lat) * 111320, (a.lon - b.lon) * kx);
+}
+
+/** Gleichnamige Straßen: die dem Standort nächste zuerst (Reihenfolge sonst unverändert). */
+export function preferNearby(streets, near) {
+  if (!near) return streets;
+  const dist = (s) => {
+    if (!s.bbox) return Infinity;
+    const lat = Math.max(s.bbox[0], Math.min(s.bbox[2], near[0]));
+    const lon = Math.max(s.bbox[1], Math.min(s.bbox[3], near[1]));
+    return distanceApprox({ lat, lon }, { lat: near[0], lon: near[1] });
+  };
+  const out = [...streets];
+  for (let i = 0; i < out.length; i++) {
+    for (let j = i + 1; j < out.length; j++) {
+      if (out[j].norm === out[i].norm && dist(out[j]) < dist(out[i])) {
+        const [x] = out.splice(j, 1);
+        out.splice(i, 0, x);
+      }
+    }
+  }
+  return out;
 }

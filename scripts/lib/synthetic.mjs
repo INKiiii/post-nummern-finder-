@@ -90,6 +90,16 @@ export function makeSyntheticTown(origin = SYNTH_ORIGIN) {
   // --- Feldweg ohne Häuser ---
   way(line([[1100, 500], [1400, 500]]), { highway: 'track', name: 'Kleiwurtweg' });
 
+  // --- Deichweg: ein durchgehender Weg durch beide Orte, jeder Ort mit eigener Nummernfolge 1–20
+  //     (wie die Elbuferstraße in Tespe und Marschacht: zweimal Nr. 5 usw.)
+  way(line([[-700, -600], [0, -600], [700, -600]]), { highway: 'residential', name: 'Deichweg' });
+  for (let n = 1; n <= 20; n++) {
+    const off = Math.floor((n - 1) / 2) * 30;
+    const y = -600 + (n % 2 ? 14 : -14);
+    node(-680 + off, y, addr('Deichweg', String(n), '00001', 'Musterdorf'));
+    node(680 - off, y, addr('Deichweg', String(n), '00002', 'Beispielhausen'));
+  }
+
   // --- Blumenstraße: Nord-Süd bei x=-300, Nummern 1..20 mit Sonderfällen ---
   const b = line([
     [-300, 0],
