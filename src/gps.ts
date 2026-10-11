@@ -33,10 +33,18 @@ class Gps {
       (e) => {
         this.denied = e.code === e.PERMISSION_DENIED;
         this.error = this.denied ? 'Standortzugriff verweigert' : 'Kein GPS-Signal';
+        // Nach einer Verweigerung liefert die Abfrage nichts mehr: beenden, damit
+        // retry() sie neu starten kann, sobald der Standort erlaubt wurde.
+        if (this.denied) this.stop();
         this.emit();
       },
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 },
     );
+  }
+
+  /** Erneut versuchen (z. B. nach Rückkehr aus den Einstellungen). */
+  retry() {
+    if (this.watchId === null) this.start();
   }
 
   stop() {
@@ -79,3 +87,20 @@ class Gps {
 }
 
 export const gps = new Gps();
+
+// Zurück aus den Einstellungen: Standort automatisch neu abfragen, ohne Neuladen.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && gps.denied) gps.retry();
+  });
+  window.addEventListener('focus', () => gps.denied && gps.retry());
+  // Chrome/Android meldet Änderungen der Berechtigung direkt
+  navigator.permissions
+    ?.query({ name: 'geolocation' as PermissionName })
+    .then((st) => {
+      st.onchange = () => {
+        if (st.state !== 'denied') gps.retry();
+      };
+    })
+    .catch(() => {});
+}
