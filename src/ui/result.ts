@@ -5,20 +5,29 @@ import { show } from './app';
 import { keypad } from './keypad';
 import { openEditor } from './editor';
 import { state, savePoint, deletePoint, uid } from '../data';
-import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet } from '../core';
+import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet, snapToBuilding } from '../core';
 import { gps, type Fix } from '../gps';
 import { computeGuidance, formatDistance } from '../guidance';
 import { MapView } from '../mapview';
 import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../houseinfo';
 import { remember } from '../recents';
 import { speechSupported } from '../voice';
+import { locationDeniedBox } from './location';
 import type { FindResult, Street } from '../types';
 
 function statusNote(res: FindResult, number: string): string {
+  const base = statusBase(res, number);
+  if (res.snapped) return `${base} · auf Gebäude ohne Nummer gesetzt`;
+  return base;
+}
+
+function statusBase(res: FindResult, number: string): string {
   const nb = res.neighbors.map((n) => n.label);
   switch (res.status) {
     case 'exact':
-      return res.match?.user ? 'selbst gesetzt' : '';
+      if (res.match?.user) return 'selbst gesetzt';
+      if (res.match?.source === 'osm-interp') return 'Lage aus OSM-Interpolationslinie';
+      return '';
     case 'range':
       return `liegt in ${res.match?.label}`;
     case 'base':
@@ -54,6 +63,8 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const noteEl = h('div', { class: 'note' });
   const placeEl = h('div', { class: 'note place-note' });
   const driveEl = h('div', { class: 'drive-guide' });
+  const deniedEl = locationDeniedBox();
+  deniedEl.hidden = true;
   let drive: ReturnType<typeof drivewayFor> = null;
   const infoCard = h('button', { class: 'info-card' });
   const map = new MapView();
@@ -104,10 +115,20 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
 
   const renderGuidance = (fix: Fix | null, err?: string) => {
     const t = target();
-    if (!fix || !t) {
-      distEl.textContent = t ? '–' : '?';
+    deniedEl.hidden = !gps.denied;
+    if (gps.denied) {
+      // Statt "–": klare Anleitung, wie man den Standort erlaubt
+      distEl.hidden = true;
       sideEl.replaceChildren();
-      gpsEl.textContent = err ?? (t ? 'Warte auf GPS …' : '');
+      gpsEl.textContent = '';
+      driveEl.hidden = true;
+      return;
+    }
+    distEl.hidden = false;
+    if (!fix || !t) {
+      distEl.textContent = t ? '…' : '?';
+      sideEl.replaceChildren();
+      gpsEl.textContent = err ?? (t ? 'Warte auf GPS-Signal …' : '');
       return;
     }
     const g = computeGuidance(fix, t, street);
@@ -171,7 +192,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         h('div', { class: 'addr-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
       ),
     ),
-    h('section', { class: 'guidance' }, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
+    h('section', { class: 'guidance' }, deniedEl, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
     infoCard,
     map.root,
     h(
@@ -269,6 +290,8 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
     const existing = state.points.find(
       (p) => p.kind !== 'driveway' && p.streetName === chosen.name && normHouseNumber(p.number) === normHouseNumber(value),
     );
+    // Liegt die gedrückte Stelle auf/an einem Gebäude ohne Nummer, dessen Mitte nehmen
+    const snap = snapToBuilding(chosen, lat, lon, 12);
     await savePoint({
       id: existing?.id ?? uid(),
       kind: 'number',
@@ -276,8 +299,8 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
       streetName: chosen.name,
       number: value,
       plz: chosen.plz,
-      lat,
-      lon,
+      lat: snap?.[0] ?? lat,
+      lon: snap?.[1] ?? lon,
       created: existing?.created ?? Date.now(),
       updated: Date.now(),
     });

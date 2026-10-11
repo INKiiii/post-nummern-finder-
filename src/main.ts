@@ -5,7 +5,8 @@ import { resultScreen } from './ui/result';
 import { regionsScreen } from './ui/regions';
 import { dataScreen } from './ui/datascreen';
 import { newStreetScreen } from './ui/newstreet';
-import { loadAll, state } from './data';
+import { autoUpdateRegions, loadAll, state } from './data';
+import { toast } from './ui/dom';
 import { loadRecents } from './recents';
 import { loadHouseInfos } from './houseinfo';
 import { gps } from './gps';
@@ -31,6 +32,12 @@ async function boot() {
     show('start', {}, false);
     show('regions');
   } else show('start', {}, false);
+
+  // Neue Kartendaten automatisch übernehmen (wöchentlicher Build)
+  setTimeout(async () => {
+    const names = await autoUpdateRegions();
+    if (names.length) toast(`Kartendaten aktualisiert: ${names.join(', ')}`);
+  }, 1500);
 
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('./sw.js').catch(() => {

@@ -240,7 +240,10 @@ export function buildStreets(segments, addresses) {
         list.push(c);
       }
     }
-    for (const c of list) {
+    // 3) Abgetrennte Stücke ohne Hausnummern (z. B. Feldweg-Fortsetzung) gehören zur
+    //    gleichnamigen Straße in der Nähe (bis 1,5 km): zusammenführen statt doppelt anzeigen.
+    const merged = mergeEmptyClusters(list, 1500);
+    for (const c of merged) {
       const chains = c.segs.length ? mergeChains(c.segs).map((l) => simplifyLine(l)) : [];
       streets.push({
         norm,
@@ -297,6 +300,66 @@ export function attachDriveways(streets, drivewaySegments) {
     attached++;
   }
   return attached;
+}
+
+/** Führt Cluster ohne Adressen mit dem nächsten gleichnamigen Cluster (bis maxM) zusammen. */
+export function mergeEmptyClusters(list, maxM) {
+  const uf = new UnionFind(list.length);
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].addrs.length) continue;
+    let best = -1;
+    let bestD = Infinity;
+    for (let j = 0; j < list.length; j++) {
+      if (j === i) continue;
+      const d = bboxGapM(list[i].bbox, list[j].bbox);
+      // Cluster mit Adressen bevorzugen
+      const score = d - (list[j].addrs.length ? 1e-6 : 0);
+      if (d <= maxM && score < bestD) {
+        bestD = score;
+        best = j;
+      }
+    }
+    if (best >= 0) uf.union(i, best);
+  }
+  const groups = new Map();
+  list.forEach((c, i) => {
+    const r = uf.find(i);
+    const g = groups.get(r);
+    if (!g) groups.set(r, { ...c, segs: [...c.segs], addrs: [...c.addrs], names: [...c.names] });
+    else {
+      g.segs.push(...c.segs);
+      g.addrs.push(...c.addrs);
+      g.names.push(...c.names);
+      g.bbox = [Math.min(g.bbox[0], c.bbox[0]), Math.min(g.bbox[1], c.bbox[1]), Math.max(g.bbox[2], c.bbox[2]), Math.max(g.bbox[3], c.bbox[3])];
+      g.pointsOnly = g.pointsOnly && c.pointsOnly;
+    }
+  });
+  return [...groups.values()];
+}
+
+/**
+ * Ordnet Wohngebäude ohne Hausnummer der nächsten Straße zu (bis 50 m), sofern dort keine
+ * Adresse liegt. Damit lassen sich geschätzte Lagen auf echte Gebäude setzen und Straßen
+ * ohne Nummern von Feldwegen ohne Häuser unterscheiden.
+ * @returns {number} Anzahl zugeordneter Gebäude
+ */
+export function attachBuildings(streets, buildings) {
+  if (!buildings?.length) return 0;
+  const roads = new SegmentGrid();
+  const addrs = new PointGrid(0.001);
+  for (const st of streets) {
+    for (const l of st.lines) roads.addLine(l, st);
+    for (const a of st.addresses) addrs.add(a.lat, a.lon, a);
+  }
+  let n = 0;
+  for (const [lat, lon] of buildings) {
+    if (addrs.within(lat, lon, 8).length) continue;
+    const near = roads.nearest(lat, lon, 50);
+    if (!near) continue;
+    (near.item.buildings ??= []).push([lat, lon]);
+    n++;
+  }
+  return n;
 }
 
 function streetMid(st) {
@@ -467,10 +530,20 @@ export function makePackage(region, sourcesMeta, built) {
           if (z) e.push(z);
           return e;
         }),
-        q: { min: q.min, max: q.max, missing: q.missing.slice(0, 200), count: q.count, ratio: Math.round(q.ratio * 1000) / 1000, gap: q.gap },
+        q: {
+          min: q.min,
+          max: q.max,
+          missing: q.missing.slice(0, 200),
+          count: q.count,
+          ratio: Math.round(q.ratio * 1000) / 1000,
+          gap: q.gap,
+          // Wohngebäude ohne Nummer an dieser Straße (0 bei Lücke = Weg ohne Häuser)
+          bu: st.buildings?.length ?? 0,
+        },
       };
       if (st.isPlace) s.t = 'place';
       if (st.driveways?.length) s.d = st.driveways.map((d) => [d.labels, encodeLine(d.line)]);
+      if (st.buildings?.length) s.b = encodeLine(st.buildings);
       return s;
     });
   return {

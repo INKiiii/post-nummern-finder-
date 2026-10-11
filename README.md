@@ -30,14 +30,31 @@ npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --only 21
 * Im Terminal steht pro Gebiet die Zahl der Straßen, Hausnummern und Straßen ohne Nummern. Mit `--details` kommt pro Straße z. B. `Nummern 1 bis 195 vorhanden (181), es fehlen 17, 23–24, 100–110` bzw. `LÜCKE: keine Hausnummern in den Daten`.
 * PLZ-Pakete sind meist deutlich kleiner als 1 MB (gut für das Handy). Wer größere Pakete möchte, nimmt `--group kreis`.
 
+### Lücken in den Daten: was die App selbst schließt
+
+OpenStreetMap ist nicht überall vollständig. Der Build holt deshalb alles heraus, was in den Daten steckt:
+
+* **Interpolationslinien** (`addr:interpolation`): Wo in OSM nur Anfangs- und Endnummer mit einer Linie dazwischen eingetragen sind, werden die Nummern dazwischen erzeugt. In der App sind sie „geschätzt“ markiert („Lage aus OSM-Interpolationslinie“).
+* **Gebäude ohne Hausnummer:** Wohngebäude ohne Nummer werden der nächsten Straße zugeordnet. Fehlt eine Nummer, setzt die App die geschätzte Lage auf das passende Gebäude derselben Straßenseite („auf Gebäude ohne Nummer gesetzt“). Auf der Karte erscheinen diese Gebäude als kleine Quadrate. Beim langen Drücken rastet ein eigener Punkt auf das Gebäude ein.
+* **Doppelte Straßen:** Abgetrennte Stücke ohne Hausnummern (z. B. Feldweg-Fortsetzungen) werden mit der gleichnamigen Straße bis 1,5 km Entfernung zusammengeführt.
+* **Wege ohne Häuser:** Straßen ohne Nummern **und** ohne Wohngebäude (Feld- und Deichwege) gelten nicht als Lücke. Sie heißen in der App „Weg ohne Häuser“ und stehen im Bericht am Ende. Echte Lücken („keine Hausnummern, N Gebäude“) stehen ganz oben in `report.csv`.
+
+Was dann noch fehlt, lässt sich nur mit besseren Daten schließen:
+
+1. **Amtliche Hauskoordinaten** (siehe unten). Sie enthalten jede vergebene Hausnummer und sind die vollständigste Quelle.
+2. **In OSM nachtragen**, z. B. mit der App *Every Door* (iPhone und Android) direkt vor Ort. Der wöchentliche Build übernimmt Änderungen automatisch.
+3. **Eigene Punkte** in der App setzen und über „Haus-Infos sichern“ mit Kollegen teilen.
+
 ### Amtliche Adressdaten zusammenführen
 
 Quellen sind austauschbar (`scripts/lib/sources/`). Amtliche Adressen (z. B. Hauskoordinaten eines Bundeslands) werden als CSV mit einer JSON-Konfiguration eingebunden (Spalten, Koordinatensystem `EPSG:25832`/`25833` oder lat/lon, Lizenz, Quellenangabe):
 
 ```bash
 npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf \
-  --official hauskoordinaten.csv:scripts/sources.example.json --state Niedersachsen
+  --official hauskoordinaten.csv:scripts/sources/niedersachsen-hk.json --state Niedersachsen
 ```
+
+**Automatisch über GitHub:** Unter *Settings › Secrets and variables › Actions › Variables* die Variable `OFFICIAL_ADDR_URL` mit der Download-Adresse der CSV- oder ZIP-Datei anlegen. Optional zeigt `OFFICIAL_ADDR_CONFIG` auf eine eigene Spalten-Konfiguration (Standard: `scripts/sources/niedersachsen-hk.json`). Passt eine Spalte nicht, bricht der Build ab und nennt alle vorhandenen Spalten.
 
 Gleiche Adressen (gleiche Straße und Nummer, weniger als 150 m auseinander) werden zusammengeführt. Die Lage kommt aus der amtlichen Quelle (Reihenfolge mit `--prefer` änderbar). Lizenz und Quellenangabe jeder beteiligten Quelle stehen im Paket und werden in der App unter „Daten“ angezeigt.
 
@@ -50,14 +67,19 @@ Auf dem Handy die Pages-Adresse öffnen und „Zum Startbildschirm hinzufügen�
 ## Die App
 
 * **Start:** Suchfeld mit Autovervollständigung (tippfehlertolerant, `Str.`/`Straße` egal), zuletzt genutzte Straßen oben, die letzten 5 Adressen als Schnellwahl. Dazu eine große Zahlentastatur mit Buchstaben-Zusatz (12a).
+* **Straße automatisch:** Mit GPS schlägt der Startscreen oben die nächstgelegene Straße (bis 50 m) als großen Knopf vor, an Kreuzungen zusätzlich die zweite. Antippen und nur noch die Nummer eingeben. Die Suche bleibt.
+* **Status:** „✓ Offline bereit · 2 Gebiete“, wenn der Service Worker alle App-Dateien gespeichert hat und mindestens ein Gebiet geladen ist, sonst ein gelber Hinweis.
+* **Standort verweigert:** Statt „–“ erscheint eine rote Anleitung „Standort erlauben: Einstellungen, Datenschutz, Ortungsdienste“ mit den Schritten für iPhone bzw. Android.
 * **Ergebnis:** Entfernung (Luftlinie) und groß **LINKS/RECHTS**. Liegt das Haus mehr als 20 m von der Straße, steht der Abstand dabei. Zufahrten aus OSM (`highway=service` + `service=driveway`) werden eingezeichnet, die Abzweigung ist mit **E** markiert („Einfahrt in 120 m links“). Fehlt eine Zufahrt, setzt man die Einfahrt per langem Drücken selbst; sie wird lokal gespeichert und mit exportiert.
-* **Karte:** Standard ist „Fahrtrichtung oben“ mit leichter Neigung, umschaltbar auf „Norden oben“ (die Wahl wird gemerkt). Mit GPS folgt die Karte dem Auto: Das Auto sitzt im unteren Drittel, die Karte zeigt höchstens ~120 m voraus und zoomt beim Annähern weiter heran. Ist das Ziel weiter weg, zeigt ein Pfeil am Rand Richtung und Entfernung („42 · 340 m“, bei vorhandener Zufahrt „E · …“), statt herauszuzoomen. Haus, Einfahrt und Auto bleiben im Nahbereich immer im Bild, auch bei Häusern in zweiter Reihe. Beschriftet werden nur die Zielnummer und je 3 Nachbarn derselben Straßenseite davor und dahinter, im Umkreis von 40 m um das Auto alle sichtbaren Nummern. Alle anderen Häuser sind kleine Punkte. Beschriftungen überlappen nie. Die Knöpfe liegen in einer Leiste unter der Karte.
+* **Karte:** Standard ist „Fahrtrichtung oben“ mit leichter Neigung, umschaltbar auf „Norden oben“ (die Wahl wird gemerkt). Mit GPS folgt die Karte dem Auto: Das Auto sitzt im unteren Drittel, die Karte zeigt höchstens ~120 m voraus und zoomt beim Annähern weiter heran. Ist das Ziel weiter weg, zeigt ein Pfeil am Rand Richtung und Entfernung („42 · 340 m“, bei vorhandener Zufahrt „E · …“), statt herauszuzoomen. Haus, Einfahrt und Auto bleiben im Nahbereich immer im Bild, auch bei Häusern in zweiter Reihe. Beschriftet werden nur die Zielnummer und je 3 Nachbarn derselben Straßenseite davor und dahinter, im Umkreis von 40 m um das Auto alle sichtbaren Nummern. Alle anderen Häuser sind kleine Punkte. Beschriftungen überlappen nie; Hausnummern haben Vorrang, Straßennamen weichen entlang der Straße aus oder werden ausgeblendet. Die Knöpfe liegen in einer Leiste unter der Karte.
 * **Straßenseite:** Fährt man auf der Zielstraße, wird die Straßenseite benutzt (stimmt auch in Kurven und bei weit entfernten Zielen), sonst die Richtung zum Ziel. Die Karte ist selbst gezeichnet (SVG, keine Kacheln), mit Postauto in Fahrtrichtung.
 * **Fehlende Nummern:** Fehlende Nummern werden aus den Nachbarn derselben Straßenseite geschätzt und als **geschätzt** markiert („zwischen 15 und 19“).
 * **Haus-Infos:** Zufahrt, Eingänge mit Lage und Briefkastenzahl (Plus/Minus), kurzer Hinweis. Alles zum Antippen. Die Karte zeigt z. B. „42: 2 Eingänge. Rechts: 3 Briefkästen. Links hinten: 2 Briefkästen.“ Hinweise mit erkennbaren Namen werden nicht gespeichert, auch nicht beim Import.
 * **Sprechen:** Mikrofon antippen und „Elbuferstraße zweiundvierzig“ sagen, das Ergebnis erscheint ohne Bestätigung. „Nächster Brief“ hört direkt wieder zu. Die Spracherkennung braucht je nach Browser Internet; die Tastatur geht immer offline.
 * **Lücken schließen:** Lang auf die Karte drücken setzt eine Hausnummer („selbst gesetzt“). Fehlende Straßen legt man über die Suche an: nachzeichnen, beim Fahren aufzeichnen oder nur mit Startpunkt.
-* **Teilen:** Unter „Daten“ Haus-Infos, eigene Punkte und Straßen als JSON exportieren oder importieren. Bei Konflikten gewinnt der neuere Stand.
+* **Sichern und Teilen:** „Haus-Infos sichern“ (unter „Daten“) speichert Haus-Infos, eigene Punkte, Einfahrten und Straßen als JSON-Datei (Teilen-Menü oder Download). Ist die letzte Sicherung älter als 14 Tage oder gab es noch keine, erinnert der Startscreen daran (nur wenn eigene Daten vorhanden sind). Import unter „Daten“; bei Konflikten gewinnt der neuere Stand.
+* **Updates:** Neue App-Versionen holt die App beim nächsten Neustart (bei der Homebildschirm-App: ganz schließen und neu öffnen). Neue Kartendaten (wöchentlicher Build) lädt sie beim Start mit Internet automatisch nach; eigene Punkte und Haus-Infos bleiben erhalten.
+* **Eigene Punkte haben Vorrang:** Ist eine Nummer in den Daten falsch verortet, gilt nach dem Setzen die eigene Lage.
 * Speicherung nur lokal (IndexedDB). Der Service Worker hält die App offline bereit.
 
 ## Qualitätsbericht und Stichprobentest (Schritt 5)

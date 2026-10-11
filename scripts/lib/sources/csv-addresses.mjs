@@ -1,6 +1,6 @@
 // Datenquelle: amtliche Adressdaten (z. B. Hauskoordinaten der Bundesländer) als CSV.
 // Die Spaltenzuordnung, Lizenz und Quellenangabe stehen in einer JSON-Konfiguration,
-// siehe scripts/sources.example.json.
+// siehe scripts/sources/niedersachsen-hk.json.
 
 import fs from 'node:fs';
 import readline from 'node:readline';

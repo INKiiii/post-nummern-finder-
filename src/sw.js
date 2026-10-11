@@ -36,3 +36,15 @@ self.addEventListener('fetch', (event) => {
   }
   event.respondWith(caches.match(req, { ignoreSearch: true }).then((r) => r || fetch(req)));
 });
+
+// Antwortet, ob alle App-Dateien im Cache liegen (Anzeige "Offline bereit").
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'offline-check' || !event.ports[0]) return;
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => Promise.all(FILES.map((f) => c.match(f, { ignoreSearch: true }))))
+      .then((hits) => event.ports[0].postMessage({ complete: hits.every(Boolean), version: VERSION }))
+      .catch(() => event.ports[0].postMessage({ complete: false })),
+  );
+});

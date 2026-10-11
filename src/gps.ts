@@ -16,6 +16,8 @@ type Listener = (fix: Fix | null, error?: string) => void;
 class Gps {
   fix: Fix | null = null;
   error: string | null = null;
+  /** Standortzugriff wurde verweigert (Nutzer muss ihn in den Einstellungen erlauben) */
+  denied = false;
   private watchId: number | null = null;
   private listeners = new Set<Listener>();
   private anchor: { lat: number; lon: number } | null = null;
@@ -29,11 +31,20 @@ class Gps {
     this.watchId = navigator.geolocation.watchPosition(
       (p) => this.onPosition(p),
       (e) => {
-        this.error = e.code === e.PERMISSION_DENIED ? 'Standortzugriff verweigert' : 'Kein GPS-Signal';
+        this.denied = e.code === e.PERMISSION_DENIED;
+        this.error = this.denied ? 'Standortzugriff verweigert' : 'Kein GPS-Signal';
+        // Nach einer Verweigerung liefert die Abfrage nichts mehr: beenden, damit
+        // retry() sie neu starten kann, sobald der Standort erlaubt wurde.
+        if (this.denied) this.stop();
         this.emit();
       },
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 },
     );
+  }
+
+  /** Erneut versuchen (z. B. nach Rückkehr aus den Einstellungen). */
+  retry() {
+    if (this.watchId === null) this.start();
   }
 
   stop() {
@@ -52,6 +63,7 @@ class Gps {
   private onPosition(p: GeolocationPosition) {
     const { latitude: lat, longitude: lon, accuracy, heading, speed } = p.coords;
     this.error = null;
+    this.denied = false;
     // Kurs vom GPS nur bei Fahrt verlässlich; sonst aus der Bewegung (> 8 m) berechnen.
     if (heading !== null && Number.isFinite(heading) && speed !== null && speed > 1.5) {
       this.heading = heading;
@@ -75,3 +87,20 @@ class Gps {
 }
 
 export const gps = new Gps();
+
+// Zurück aus den Einstellungen: Standort automatisch neu abfragen, ohne Neuladen.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && gps.denied) gps.retry();
+  });
+  window.addEventListener('focus', () => gps.denied && gps.retry());
+  // Chrome/Android meldet Änderungen der Berechtigung direkt
+  navigator.permissions
+    ?.query({ name: 'geolocation' as PermissionName })
+    .then((st) => {
+      st.onchange = () => {
+        if (st.state !== 'denied') gps.retry();
+      };
+    })
+    .catch(() => {});
+}

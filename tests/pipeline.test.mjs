@@ -6,8 +6,8 @@ import path from 'node:path';
 import { writePbf } from '../scripts/lib/pbf-writer.mjs';
 import { makeSyntheticTown } from '../scripts/lib/synthetic.mjs';
 import { loadOsmPbf } from '../scripts/lib/sources/osm-pbf.mjs';
-import { mergeAddresses, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
-import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet } from '../src/shared/lookup.js';
+import { mergeAddresses, attachBuildings, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
+import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets } from '../src/shared/lookup.js';
 import { distanceM } from '../src/shared/geo.js';
 
 let pkgs;
@@ -17,12 +17,13 @@ function build(opts = {}) {
   const file = path.join(dir, 'town.osm.pbf');
   fs.writeFileSync(file, writePbf(town, { blockSize: 50 }));
   const src = loadOsmPbf(file);
-  const { addresses } = mergeAddresses([src]);
+  const { addresses } = mergeAddresses([src], ['osm', 'osm-interp']);
   const streets = buildStreets(src.streetSegments, addresses);
   attachDriveways(streets, src.drivewaySegments);
+  attachBuildings(streets, src.buildings);
   assignStreetIds(streets);
   const { regions } = assignRegions(streets, src.areas, { group: 'plz', ...opts });
-  return regions.map((r) => makePackage(r, [src.meta], 'test'));
+  return regions.map((r) => makePackage(r, [src.meta, ...src.extraSources], 'test'));
 }
 
 beforeAll(() => {
@@ -173,6 +174,71 @@ describe('Suche und Lage (App-Logik)', () => {
     expect(d.user).toBe(true);
     expect(d.line[0]).toEqual([jl, jo]);
     expect(d.line[1]).toEqual([r.lat, r.lon]);
+  });
+
+  it('schlägt die nächstgelegene Straße vor', () => {
+    const idx = buildIndex(pkgs);
+    const near = (x, y) => nearestStreets(idx, ...town.proj.toLatLon(x, y), 50, 2).map((r) => r.street.name);
+    expect(near(-600, -4)).toEqual(['Elbuferstraße']);
+    expect(near(-300, 200)[0]).toBe('Blumenstraße');
+    // An der Kreuzung beide, nächste zuerst
+    expect(near(-295, 12)).toEqual(['Blumenstraße', 'Elbuferstraße']);
+    // Straße ohne Geometrie: über die Hausnummern
+    expect(near(-590, 125)[0]).toBe('Am Deich');
+    expect(near(-600, 600)).toEqual([]);
+  });
+
+  it('erzeugt Nummern aus addr:interpolation-Linien', () => {
+    const iw = pkgs[1].streets.find((s) => s.n === 'Interpolweg');
+    expect(iw.h.map((h) => h[0])).toEqual(['1', '3', '5', '7', '9', '11', '13', '15']);
+    const idx = buildIndex(pkgs);
+    const st = searchStreets(idx, 'Interpolweg')[0];
+    const r7 = findHouse(st, '7');
+    expect(r7.status).toBe('exact');
+    expect(r7.estimated).toBe(true); // Lage nur aus der Linie
+    expect(r7.match.source).toBe('osm-interp');
+    const [x] = town.proj.toXY(r7.lat, r7.lon);
+    expect(x).toBeCloseTo(610 + (6 / 14) * 280, 0);
+    expect(findHouse(st, '1').estimated).toBe(false);
+  });
+
+  it('führt abgetrennte Stücke ohne Nummern mit der gleichnamigen Straße zusammen', () => {
+    const reet = pkgs.flatMap((p) => p.streets.filter((s) => s.n === 'Reetweg'));
+    expect(new Set(reet.map((s) => s.id)).size).toBe(1);
+    expect(reet[0].l.length).toBe(2); // beide Stücke als Linien enthalten
+    expect(reet[0].h.length).toBe(2);
+  });
+
+  it('setzt geschätzte Lagen auf Gebäude ohne Hausnummer', () => {
+    const idx = buildIndex(pkgs);
+    const e = searchStreets(idx, 'Elbuferstraße')[0];
+    expect(e.buildings.length).toBe(11);
+    const r = findHouse(e, '104');
+    expect(r.status).toBe('interpolated');
+    expect(r.snapped).toBe(true);
+    const [x, y] = town.proj.toXY(r.lat, r.lon);
+    expect(x).toBeCloseTo(-980 + 51 * 20, 0);
+    expect(y).toBeLessThan(-10); // gerade Seite (Süden)
+  });
+
+  it('unterscheidet Wege ohne Häuser von Straßen mit Häusern ohne Nummern', () => {
+    const feld = pkgs[1].streets.find((s) => s.n === 'Kleiwurtweg');
+    expect(feld.q.gap).toBe(true);
+    expect(feld.q.bu).toBe(0);
+    const e = pkgs[0].streets.find((s) => s.n === 'Elbuferstraße');
+    expect(e.q.bu).toBe(11);
+  });
+
+  it('eigener Punkt korrigiert eine falsch eingetragene Nummer', () => {
+    const idx0 = buildIndex(pkgs);
+    const e0 = searchStreets(idx0, 'Elbuferstraße')[0];
+    const [lat, lon] = town.proj.toLatLon(-500, 30);
+    const idx = buildIndex(pkgs, {
+      points: [{ id: 'k1', kind: 'number', streetId: e0.id, streetName: 'Elbuferstraße', number: '42', lat, lon, updated: 1, created: 1 }],
+    });
+    const r = findHouse(idx.streets.get(e0.id), '42');
+    expect(r.match.user).toBe(true);
+    expect(r.lat).toBeCloseTo(lat, 9);
   });
 });
 

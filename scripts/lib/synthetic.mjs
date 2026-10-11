@@ -71,6 +71,25 @@ export function makeSyntheticTown(origin = SYNTH_ORIGIN) {
   way(line([[-372, 3], [-372, 40], [-374, 62]]), { highway: 'service', service: 'driveway' });
   way(line([[-200, 500], [-200, 540]]), { highway: 'service', service: 'driveway' });
 
+  // Wohngebäude ohne Hausnummer dort, wo 100–110 fehlen (Lage für Schätzung)
+  for (let n = 100; n <= 110; n++) {
+    const x = -980 + Math.floor((n - 1) / 2) * 20;
+    square(x, yAt(x) + (n % 2 === 1 ? 15 : -15), 10, {});
+  }
+
+  // --- Interpolweg: nur 1 und 15 als Adressen, dazwischen addr:interpolation=odd ---
+  way(line([[600, -300], [900, -300]]), { highway: 'residential', name: 'Interpolweg' });
+  const i1 = node(610, -285, addr('Interpolweg', '1', '00002', 'Beispielhausen'));
+  const iMid = node(750, -285);
+  const i15 = node(890, -285, addr('Interpolweg', '15', '00002', 'Beispielhausen'));
+  way([i1, iMid, i15], { 'addr:interpolation': 'odd' });
+
+  // --- Reetweg: abgetrenntes Stück ohne Hausnummern 600 m weiter (soll keine 2. Straße werden)
+  way(line([[200, 800], [200, 900]]), { highway: 'track', name: 'Reetweg' });
+
+  // --- Feldweg ohne Häuser ---
+  way(line([[1100, 500], [1400, 500]]), { highway: 'track', name: 'Kleiwurtweg' });
+
   // --- Blumenstraße: Nord-Süd bei x=-300, Nummern 1..20 mit Sonderfällen ---
   const b = line([
     [-300, 0],

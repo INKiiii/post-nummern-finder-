@@ -114,3 +114,30 @@ export async function deleteUserStreet(id: string): Promise<void> {
 export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
+
+/**
+ * Prüft beim Start (mit Internet), ob es neuere Kartendaten für die geladenen Gebiete gibt,
+ * und lädt sie im Hintergrund nach. Eigene Punkte, Straßen und Haus-Infos bleiben unberührt.
+ * @returns Namen der aktualisierten Gebiete
+ */
+export async function autoUpdateRegions(): Promise<string[]> {
+  if (!state.packages.length || !navigator.onLine) return [];
+  let index: RegionEntry[];
+  try {
+    index = (await fetchRegionIndex()).regions;
+  } catch {
+    return [];
+  }
+  const updated: string[] = [];
+  for (const p of [...state.packages]) {
+    const remote = index.find((r) => r.id === p.id);
+    if (!remote || remote.hash === p.entry.hash) continue;
+    try {
+      await downloadRegion(remote);
+      updated.push(remote.name);
+    } catch {
+      /* nächster Versuch beim nächsten Start */
+    }
+  }
+  return updated;
+}

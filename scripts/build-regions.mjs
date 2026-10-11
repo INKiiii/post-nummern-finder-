@@ -9,7 +9,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { loadOsmPbf } from './lib/sources/osm-pbf.mjs';
 import { loadCsvAddresses } from './lib/sources/csv-addresses.mjs';
-import { mergeAddresses, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
+import { mergeAddresses, attachBuildings, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
 import { describeStreet, writeReport, loadAllPackages } from './lib/report.mjs';
 
 const HELP = `
@@ -105,9 +105,11 @@ async function main() {
 
   // Quellen-Metadaten (gleiche ID nur einmal, z. B. mehrere OSM-Auszüge)
   const metas = [];
-  for (const s of sources) if (!metas.some((m) => m.id === s.meta.id)) metas.push(s.meta);
-  const official = metas.filter((m) => m.id !== 'osm').map((m) => m.id);
-  const prefer = values.prefer ? list(values.prefer) : [...official, 'osm'];
+  for (const s of sources)
+    for (const m of [s.meta, ...(s.extraSources ?? [])]) if (!metas.some((x) => x.id === m.id)) metas.push(m);
+  const official = metas.filter((m) => !m.id.startsWith('osm')).map((m) => m.id);
+  // Lage: amtlich vor OSM vor OSM-Interpolationslinie
+  const prefer = values.prefer ? list(values.prefer) : [...official, 'osm', 'osm-interp'];
 
   const { addresses, merged } = mergeAddresses(sources, prefer);
   console.error(`Adressen gesamt: ${fmt(addresses.length)} (${fmt(merged)} Dubletten zusammengeführt)`);
@@ -122,6 +124,8 @@ async function main() {
   const streets = buildStreets(segments, addresses);
   const driveways = attachDriveways(streets, sources.flatMap((s) => s.drivewaySegments ?? []));
   console.error(`Zufahrtswege Häusern zugeordnet: ${fmt(driveways)}`);
+  const blds = attachBuildings(streets, sources.flatMap((s) => s.buildings ?? []));
+  console.error(`Wohngebäude ohne Hausnummer Straßen zugeordnet: ${fmt(blds)}`);
   assignStreetIds(streets);
   const { regions, unassigned } = assignRegions(streets, areas, {
     group: values.group,
@@ -150,7 +154,8 @@ async function main() {
     const pkg = makePackage(r, metas, built);
     const w = writePackage(pkg, values.out);
     const numbers = pkg.streets.reduce((n, s) => n + s.h.length, 0);
-    const gaps = pkg.streets.filter((s) => s.q.gap).length;
+    // Echte Lücken: Straßen mit Häusern, aber ohne Nummern (Feldwege ohne Häuser zählen nicht)
+    const gaps = pkg.streets.filter((s) => s.q.gap && s.q.bu > 0).length;
     totStreets += pkg.streets.length;
     totNumbers += numbers;
     const old = entries.get(pkg.id);
@@ -187,7 +192,7 @@ async function main() {
 
   // ---- Qualitätsbericht über alle gebauten Gebiete ----
   const rep = writeReport(loadAllPackages(values.out), values.report);
-  console.log(`Qualitätsbericht: ${values.report} (${fmt(rep.streets)} Straßen, davon ${fmt(rep.gaps)} ohne Hausnummern)`);
+  console.log(`Qualitätsbericht: ${values.report} (${fmt(rep.streets)} Straßen, davon ${fmt(rep.gaps)} mit Häusern ohne Hausnummern, ${fmt(rep.paths)} Wege ohne Häuser)`);
   console.log(`Fertig in ${((Date.now() - t0) / 1000).toFixed(0)} s.`);
 }
 

@@ -60,6 +60,7 @@ export function decodeStreet(s, pkg) {
     place: s.p ?? '',
     plz: s.z ?? pkg?.plz ?? '',
     driveways,
+    buildings: s.b ? decodeLine(s.b) : [],
     norm: normStreet(s.n),
     fold: foldText(s.n),
     lines,
@@ -136,6 +137,7 @@ export function addUserStreet(index, us) {
     lines,
     numbers,
     driveways: [],
+    buildings: [],
     q: null,
     regions: new Set(),
     user: true,
@@ -239,8 +241,23 @@ export function bestStreetMatch(index, spoken) {
 export function findHouse(street, input) {
   const p = parseHouseNumber(input);
   const nums = street.numbers;
-  const exact = nums.find((n) => n.norm === p.norm) ?? nums.find((n) => n.num === p.num && n.suffix === p.suffix && p.num !== null);
-  if (exact) return { status: 'exact', lat: exact.lat, lon: exact.lon, estimated: false, match: exact, neighbors: [] };
+  // Eigene Punkte haben Vorrang (z. B. Korrektur einer falsch eingetragenen Nummer)
+  const same = (n) => n.norm === p.norm || (p.num !== null && n.num === p.num && n.suffix === p.suffix);
+  const exact = nums.find((n) => n.user && same(n)) ?? nums.find((n) => n.norm === p.norm) ?? nums.find(same);
+  if (exact) {
+    // Nummern aus OSM-Interpolationslinien sind nur ungefähr verortet
+    const approx = exact.source === 'osm-interp';
+    const snapped = approx ? snapToBuilding(street, exact.lat, exact.lon, 20) : null;
+    return {
+      status: 'exact',
+      lat: snapped?.[0] ?? exact.lat,
+      lon: snapped?.[1] ?? exact.lon,
+      estimated: approx,
+      snapped: !!snapped,
+      match: exact,
+      neighbors: [],
+    };
+  }
   if (p.num !== null) {
     const range = nums.find((n) => n.to !== null && n.num <= p.num && p.num <= n.to && !p.suffix);
     if (range) return { status: 'range', lat: range.lat, lon: range.lon, estimated: false, match: range, neighbors: [] };
@@ -249,7 +266,12 @@ export function findHouse(street, input) {
       if (base) return { status: 'base', lat: base.lat, lon: base.lon, estimated: true, match: base, neighbors: [base] };
     }
     const est = interpolate(street, p.num);
-    if (est) return est;
+    if (est) {
+      // Geschätzte Lage auf ein echtes Gebäude ohne Hausnummer setzen (gleiche Straßenseite)
+      const b = snapToBuilding(street, est.lat, est.lon, 25);
+      if (b) return { ...est, lat: b[0], lon: b[1], snapped: true };
+      return est;
+    }
   }
   const mid = streetMidpoint(street);
   if (mid) return { status: 'street', lat: mid[0], lon: mid[1], estimated: true, neighbors: [] };
@@ -376,6 +398,68 @@ export function distanceToStreet(street, lat, lon) {
     if (line.length < 2) continue;
     const r = projectOnLine([0, 0], line.map(([la, lo]) => proj.toXY(la, lo)));
     if (r && (best === null || r.dist < best)) best = r.dist;
+  }
+  return best;
+}
+
+/**
+ * Straßen in der Nähe eines Standorts, nächste zuerst (für den Vorschlag auf dem Startscreen).
+ * Abstand zur Straßenlinie, bei Straßen ohne Geometrie zur nächsten Hausnummer.
+ * @returns {{street:object, dist:number}[]}
+ */
+export function nearestStreets(index, lat, lon, maxM = 60, limit = 3) {
+  const pad = maxM / 111320;
+  const padLon = pad / Math.cos((lat * Math.PI) / 180);
+  const out = [];
+  for (const s of index.streets.values()) {
+    const b = s.bbox;
+    if (!b || lat < b[0] - pad || lat > b[2] + pad || lon < b[1] - padLon || lon > b[3] + padLon) continue;
+    let d = distanceToStreet(s, lat, lon);
+    if (d === null) {
+      for (const n of s.numbers) {
+        const x = (n.lon - lon) * 111320 * Math.cos((lat * Math.PI) / 180);
+        const y = (n.lat - lat) * 111320;
+        const dn = Math.hypot(x, y);
+        if (d === null || dn < d) d = dn;
+      }
+    }
+    if (d !== null && d <= maxM) out.push({ street: s, dist: d });
+  }
+  // Gleiche Straße (Name) nur einmal, nächste zuerst
+  out.sort((a, b) => a.dist - b.dist);
+  const seen = new Set();
+  return out.filter((x) => !seen.has(x.street.norm) && seen.add(x.street.norm)).slice(0, limit);
+}
+
+/**
+ * Nächstes Gebäude ohne Hausnummer zu einer geschätzten Lage (bis maxM Meter), auf derselben
+ * Straßenseite und nicht schon mit einer bekannten Nummer belegt. Sonst null.
+ */
+export function snapToBuilding(street, lat, lon, maxM = 25) {
+  const blds = street.buildings ?? [];
+  if (!blds.length) return null;
+  const proj = makeProjection(lat, lon);
+  const lines = street.lines.filter((l) => l.length >= 2).map((l) => l.map(([la, lo]) => proj.toXY(la, lo)));
+  const side = (pt) => {
+    let best = null;
+    for (const l of lines) {
+      const r = projectOnLine(pt, l);
+      if (r && (!best || r.dist < best.dist)) best = r;
+    }
+    return best ? Math.sign(best.cross) : 0;
+  };
+  const mySide = side([0, 0]);
+  const taken = street.numbers.map((n) => proj.toXY(n.lat, n.lon));
+  let best = null;
+  let bestD = maxM;
+  for (const [bl, bo] of blds) {
+    const p = proj.toXY(bl, bo);
+    const d = Math.hypot(p[0], p[1]);
+    if (d > bestD) continue;
+    if (mySide && side(p) !== mySide) continue;
+    if (taken.some((t) => Math.hypot(t[0] - p[0], t[1] - p[1]) < 6)) continue;
+    best = [bl, bo];
+    bestD = d;
   }
   return best;
 }

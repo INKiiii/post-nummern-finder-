@@ -4,7 +4,11 @@ import { h, toast } from './dom';
 import { keypad } from './keypad';
 import { show } from './app';
 import { state } from '../data';
-import { searchStreets } from '../core';
+import { nearestStreets, searchStreets } from '../core';
+import { gps } from '../gps';
+import { locationDeniedBox } from './location';
+import { backupState, backupUserData, BACKUP_DAYS } from '../exportimport';
+import { offlineStatus } from '../offline';
 import { recentAddresses, recentStreets } from '../recents';
 import { listenForAddress, speechSupported } from '../voice';
 import type { Street } from '../types';
@@ -26,6 +30,71 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   const suggestions = h('div', { class: 'suggestions', role: 'listbox' });
   const chosen = h('div', { class: 'chosen' });
   const quick = h('div', { class: 'quick' });
+  const nearEl = h('div', { class: 'near' });
+  const statusEl = h('div', { class: 'status-row' });
+  const backupEl = h('div');
+
+  // Nächstgelegene Straße als großer Knopf (nur Nummer noch eingeben)
+  let nearKey = '';
+  const renderNear = () => {
+    if (gps.denied) {
+      if (nearKey !== 'denied') nearEl.replaceChildren(locationDeniedBox(true));
+      nearKey = 'denied';
+      return;
+    }
+    const fix = gps.fix;
+    const cands = fix && fix.accuracy < 80 ? nearestStreets(state.index, fix.lat, fix.lon, 50, 2) : [];
+    const shown = cands.filter((c) => c.street.id !== street?.id);
+    const key = shown.map((c) => c.street.id).join('|') + (street ? '#' + street.id : '');
+    if (key === nearKey) return;
+    nearKey = key;
+    nearEl.replaceChildren(
+      ...shown.map((c, i) =>
+        h(
+          'button',
+          { class: i === 0 ? 'btn near-main' : 'btn near-alt', onClick: () => choose(c.street) },
+          h('span', { class: 'near-name' }, `📍 ${c.street.name}`),
+          h('span', { class: 'near-meta' }, i === 0 ? `Hier · ${c.street.place || c.street.plz}` : 'oder'),
+        ),
+      ),
+    );
+  };
+
+  const renderStatus = async () => {
+    const [off, b] = await Promise.all([offlineStatus(), backupState()]);
+    const ready = off.app && off.regions > 0;
+    statusEl.replaceChildren(
+      h(
+        'span',
+        { class: ready ? 'badge-ok' : 'badge-warn' },
+        ready
+          ? `✓ Offline bereit · ${off.regions} ${off.regions === 1 ? 'Gebiet' : 'Gebiete'}`
+          : off.regions === 0
+            ? '⚠ Kein Gebiet geladen'
+            : '⚠ Noch nicht offline bereit',
+      ),
+    );
+    // Sicherungshinweis nur, wenn es eigene Daten gibt
+    if (b.count > 0 && b.due) {
+      backupEl.replaceChildren(
+        h(
+          'button',
+          {
+            class: 'banner',
+            onClick: async () => {
+              if (await backupUserData()) {
+                toast('Haus-Infos gesichert.');
+                void renderStatus();
+              }
+            },
+          },
+          b.last
+            ? `💾 Letzte Sicherung vor über ${BACKUP_DAYS} Tagen – jetzt Haus-Infos sichern`
+            : '💾 Haus-Infos noch nie gesichert – jetzt sichern',
+        ),
+      );
+    } else backupEl.replaceChildren();
+  };
 
   const go = () => {
     if (!street) {
@@ -46,6 +115,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     input.blur();
     suggestions.replaceChildren();
     renderChosen();
+    renderNear();
   };
 
   const renderChosen = () => {
@@ -60,7 +130,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     chosen.replaceChildren(
       h(
         'button',
-        { class: 'chosen-street', onClick: () => ((street = null), renderChosen(), input.focus()) },
+        { class: 'chosen-street', onClick: () => ((street = null), renderChosen(), renderNear(), input.focus()) },
         h('span', { class: 'chosen-name' }, street.name),
         h('span', { class: 'chosen-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
         h('span', { class: 'chosen-x', 'aria-label': 'Andere Straße' }, '✕'),
@@ -70,7 +140,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
 
   const streetInfo = (s: Street) => {
     if (s.user) return 'selbst angelegt';
-    if (!s.numbers.length) return 'keine Nummern';
+    if (!s.numbers.length) return s.buildings?.length ? `keine Nummern · ${s.buildings.length} Häuser` : 'Weg ohne Häuser';
     return `${s.numbers.length} Nr.`;
   };
 
@@ -146,9 +216,12 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
       h('div', { class: 'title' }, 'Hausnummer'),
       h('button', { class: 'btn', onClick: () => show('data') }, '⇅ Daten'),
     ),
+    statusEl,
     noData
       ? h('button', { class: 'banner', onClick: () => show('regions') }, 'Noch kein Gebiet geladen – hier tippen, um ein Gebiet herunterzuladen.')
       : null,
+    backupEl,
+    nearEl,
     speechSupported() ? h('button', { class: 'btn mic', onClick: voice }, '🎤 Sprechen') : null,
     h('div', { class: 'search-wrap' }, input, chosen, suggestions),
     quick,
@@ -166,6 +239,9 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   renderNumber();
   renderChosen();
   renderQuick();
+  renderNear();
+  void renderStatus();
+  const unsubGps = gps.subscribe(() => renderNear());
   if (params.listen && speechSupported()) setTimeout(voice, 150);
 
   // Antippen außerhalb schließt die Vorschläge
@@ -173,5 +249,8 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     if (!(e.target as Element).closest('.search-wrap')) suggestions.replaceChildren();
   };
   document.addEventListener('pointerdown', outside);
-  return () => document.removeEventListener('pointerdown', outside);
+  return () => {
+    document.removeEventListener('pointerdown', outside);
+    unsubGps();
+  };
 }

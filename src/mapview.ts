@@ -465,25 +465,15 @@ export class MapView {
         })
         .join('');
 
-    let labelCount = 0;
+    const streetLabels: Street[] = [];
     if (index) {
       for (const s of index.streets.values()) {
         if (s === focus || !s.bbox) continue;
         const [y0, x0, y1, x1] = s.bbox;
         if (y1 < south || y0 > north || x1 < west || x0 > east) continue;
         for (const line of s.lines) el('path', { d: pathOf(line), class: 'st', 'stroke-width': streetW }, gStreets);
-        if (S > 0.6 && labelCount < 40 && s.lines.length) {
-          const longest = s.lines.reduce((a, l) => (l.length > a.length ? l : a));
-          const mid = longest[Math.floor(longest.length / 2)];
-          const [x, y] = toS(mid[0], mid[1]);
-          const box = textBox(x, y - streetW, s.name, 13, 'middle');
-          if (visible(x, y, -10) && free(...box)) {
-            reserve(...box);
-            const t = el('text', { x, y: y - streetW, class: 'st-label' }, gLabels);
-            t.textContent = s.name;
-            labelCount++;
-          }
-        }
+        // Straßennamen erst nach den Hausnummern platzieren (Hausnummern haben Vorrang)
+        if (S > 0.6 && s.lines.length) streetLabels.push(s);
       }
     }
     if (focus) {
@@ -523,6 +513,13 @@ export class MapView {
       };
       const targetNorm = target ? normHouseNumber(target.label) : '';
       const near: [HouseNumber, number, number][] = [];
+      // Gebäude ohne Hausnummer als kleine Quadrate
+      for (const [bl, bo] of focus.buildings ?? []) {
+        const [x, y] = toS(bl, bo);
+        if (!visible(x, y)) continue;
+        el('rect', { x: x - 5, y: y - 5, width: 10, height: 10, class: 'bld' }, gDots);
+        reserve(x - 6, y - 6, x + 6, y + 6);
+      }
       for (const n of focus.numbers) {
         const [x, y] = toS(n.lat, n.lon);
         if (!visible(x, y)) continue;
@@ -532,6 +529,53 @@ export class MapView {
         else if (user && distanceM(user.lat, user.lon, n.lat, n.lon) <= LABEL_NEAR_CAR) near.push([n, x, y]);
       }
       for (const [n, x, y] of near) label(n, x, y, false);
+      // Auch unbeschriftete Hauspunkte freihalten
+      for (const n of focus.numbers) {
+        const [x, y] = toS(n.lat, n.lon);
+        if (visible(x, y)) reserve(x - 6, y - 6, x + 6, y + 6);
+      }
+    }
+    // Straßennamen: weichen entlang der Straße aus (Mitte, dann weiter außen, über/unter der
+    // Linie) oder werden ausgeblendet. Nie über Hausnummern, Ziel, Einfahrt oder Auto.
+    for (const n of neighbors) {
+      const [x, y] = toS(n.lat, n.lon);
+      reserve(x - 13, y - 36, x + 13, y + 13);
+    }
+    let labelCount = 0;
+    for (const st of streetLabels) {
+      if (labelCount >= 40) break;
+      const longest = st.lines.reduce((a, l) => (l.length > a.length ? l : a));
+      const sp = longest.map(([la, lo]) => toS(la, lo));
+      const cum = [0];
+      for (let i = 1; i < sp.length; i++) cum.push(cum[i - 1] + Math.hypot(sp[i][0] - sp[i - 1][0], sp[i][1] - sp[i - 1][1]));
+      // Kandidaten nur auf dem sichtbaren Teil der Straße, von dessen Mitte nach außen
+      const total = cum[cum.length - 1];
+      const step = Math.max(20, total / 300);
+      const cands: [number, number][] = [];
+      for (let d = 0, i = 1; d <= total && sp.length > 1; d += step) {
+        while (i < cum.length - 1 && cum[i] < d) i++;
+        const t = Math.max(0, Math.min(1, (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1)));
+        const x = sp[i - 1][0] + (sp[i][0] - sp[i - 1][0]) * t;
+        const y = sp[i - 1][1] + (sp[i][1] - sp[i - 1][1]) * t;
+        if (x > 40 && x < w - 40 && y > 20 && y < h - 20) cands.push([x, y]);
+      }
+      const mid = Math.floor(cands.length / 2);
+      const order = cands.map((_, k) => k).sort((p1, p2) => Math.abs(p1 - mid) - Math.abs(p2 - mid));
+      let placedLabel = false;
+      for (const k of order.slice(0, 24)) {
+        const [x, y] = cands[k];
+        for (const ty of [y - streetW, y + streetW + 15]) {
+          const box = textBox(x, ty, st.name, 15, 'middle');
+          if (box[0] < 0 || box[2] > w || !free(...box)) continue;
+          reserve(...box);
+          const t = el('text', { x, y: ty, class: 'st-label' }, gLabels);
+          t.textContent = st.name;
+          labelCount++;
+          placedLabel = true;
+          break;
+        }
+        if (placedLabel) break;
+      }
     }
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);

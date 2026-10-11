@@ -73,6 +73,8 @@ export function loadOsmPbf(file, opts = {}) {
 
   const addrNodes = [];
   const addrWays = []; // {id, tags(addr), refs}
+  const interpWays = []; // {type, street, refs} – addr:interpolation-Linien
+  const plainBuildings = []; // Gebäude ohne Hausnummer (Wohngebäude), nur refs
   const segments = []; // {id, name, highway, refs}
   const driveways = []; // {id, refs} – Zufahrtswege (highway=service, service=driveway)
   const addrRels = []; // {addr, outer:[wayIds]}
@@ -104,6 +106,12 @@ export function loadOsmPbf(file, opts = {}) {
       eachWay(block, (id, tags, getRefs) => {
         const a = addrOf(tags);
         if (a) addrWays.push({ id, addr: a, refs: getRefs() });
+        else if (tags.building && RESIDENTIAL.has(tags.building) && !tags['addr:housenumber']) {
+          plainBuildings.push(getRefs());
+        }
+        if (tags['addr:interpolation']) {
+          interpWays.push({ type: tags['addr:interpolation'], street: tags['addr:street'] ?? '', refs: getRefs() });
+        }
         const hw = tags.highway;
         if (hw && tags.name && HIGHWAYS.has(hw === 'construction' ? 'construction' : hw) && tags.area !== 'yes') {
           segments.push({ id, name: tags.name, highway: hw, refs: getRefs() });
@@ -156,6 +164,8 @@ export function loadOsmPbf(file, opts = {}) {
   // ---------- Durchlauf C ----------
   const need = new IdList();
   for (const w of addrWays) need.pushAll(w.refs);
+  for (const w of interpWays) need.pushAll(w.refs);
+  for (const refs of plainBuildings) need.pushAll(refs);
   for (const s of segments) need.pushAll(s.refs);
   for (const d of driveways) need.pushAll(d.refs);
   for (const refs of memberWays.values()) need.pushAll(refs);
@@ -230,6 +240,33 @@ export function loadOsmPbf(file, opts = {}) {
     if (pts.length >= 2) streetSegments.push({ name: s.name, highway: s.highway, nodeIds, pts });
   }
 
+  // addr:interpolation: Nummern zwischen zwei Adressknoten entlang der Linie verteilen
+  const nodeAddr = new Map();
+  for (const a of addrNodes) nodeAddr.set(Number(a.osm.slice(1)), a);
+  let interpCount = 0;
+  for (const w of interpWays) {
+    for (const g of interpolateWay(w, nodeAddr, coord)) {
+      addresses.push(g);
+      interpCount++;
+    }
+  }
+
+  // Wohngebäude ohne Hausnummer (Mittelpunkt, ab 30 m² Grundfläche)
+  const buildings = [];
+  for (const refs of plainBuildings) {
+    if (refs.length < 4 || refs[0] !== refs[refs.length - 1]) continue;
+    const { pts } = resolve(refs);
+    if (pts.length < 4) continue;
+    const proj = makeProjection(pts[0][0], pts[0][1]);
+    const ring = pts.slice(0, -1).map(([la, lo]) => proj.toXY(la, lo));
+    let area = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) area += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    if (Math.abs(area / 2) < 30) continue;
+    const [x, y] = polygonCentroid(ring);
+    buildings.push(proj.toLatLon(x, y));
+  }
+  log(`Interpolationslinien: ${interpCount} Nummern erzeugt; ${buildings.length} Wohngebäude ohne Hausnummer`);
+
   const drivewaySegments = [];
   for (const d of driveways) {
     const r = resolve(d.refs);
@@ -255,11 +292,79 @@ export function loadOsmPbf(file, opts = {}) {
       url: 'https://www.openstreetmap.org/copyright',
       date,
     },
-    addresses: addresses.map((a) => ({ ...a, source: 'osm' })),
+    addresses: addresses.map((a) => ({ ...a, source: a.source ?? 'osm' })),
+    extraSources: [
+      {
+        id: 'osm-interp',
+        name: 'OpenStreetMap (Interpolationslinie)',
+        license: 'ODbL-1.0',
+        attribution: '© OpenStreetMap-Mitwirkende',
+        url: 'https://www.openstreetmap.org/copyright',
+        date,
+      },
+    ],
+    buildings,
     streetSegments,
     drivewaySegments,
     areas,
   };
+}
+
+// Gebäudearten, die als Wohn- bzw. Zustellgebäude zählen (keine Garagen, Schuppen usw.)
+const RESIDENTIAL = new Set([
+  'yes', 'house', 'residential', 'detached', 'semidetached_house', 'terrace', 'apartments',
+  'farm', 'bungalow', 'dormitory', 'commercial', 'retail', 'office', 'farm_auxiliary_house',
+]);
+
+/**
+ * Erzeugt Adressen aus einer addr:interpolation-Linie. Zwischen je zwei Knoten mit Hausnummer
+ * werden die fehlenden Nummern (gerade/ungerade/alle) gleichmäßig verteilt.
+ */
+export function interpolateWay(w, nodeAddr, coord) {
+  const step = w.type === 'all' || w.type === '1' ? 1 : w.type === 'odd' || w.type === 'even' || w.type === '2' ? 2 : 0;
+  if (!step) return [];
+  const pts = w.refs.map((r) => coord(r));
+  if (pts.some((p) => !p)) return [];
+  const proj = makeProjection(pts[0][0], pts[0][1]);
+  const xy = pts.map(([la, lo]) => proj.toXY(la, lo));
+  const cum = [0];
+  for (let i = 1; i < xy.length; i++) cum.push(cum[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]));
+  const anchors = [];
+  w.refs.forEach((r, i) => {
+    const a = nodeAddr.get(r);
+    const n = a ? parseInt(a.housenumber, 10) : NaN;
+    if (a && Number.isFinite(n) && /^\d+$/.test(a.housenumber.trim())) anchors.push({ i, n, a });
+  });
+  const out = [];
+  for (let k = 0; k + 1 < anchors.length; k++) {
+    const A = anchors[k];
+    const B = anchors[k + 1];
+    const lo = Math.min(A.n, B.n);
+    const hi = Math.max(A.n, B.n);
+    if (hi - lo < 2 || hi - lo > 400 || (step === 2 && (hi - lo) % 2)) continue;
+    const street = w.street || A.a.street;
+    if (!street || (B.a.street && B.a.street !== street)) continue;
+    for (let n = lo + step; n < hi; n += step) {
+      const t = (n - A.n) / (B.n - A.n);
+      const s = cum[A.i] + t * (cum[B.i] - cum[A.i]);
+      let j = 1;
+      while (j < cum.length - 1 && cum[j] < s) j++;
+      const f = Math.max(0, Math.min(1, (s - cum[j - 1]) / (cum[j] - cum[j - 1] || 1)));
+      const [lat, lon] = proj.toLatLon(xy[j - 1][0] + f * (xy[j][0] - xy[j - 1][0]), xy[j - 1][1] + f * (xy[j][1] - xy[j - 1][1]));
+      out.push({
+        housenumber: String(n),
+        street,
+        isPlace: A.a.isPlace,
+        postcode: A.a.postcode || B.a.postcode,
+        city: A.a.city || B.a.city,
+        suburb: A.a.suburb,
+        lat,
+        lon,
+        source: 'osm-interp',
+      });
+    }
+  }
+  return out;
 }
 
 /** Mittelpunkt einer Fläche (Schwerpunkt) bzw. Mitte einer offenen Linie. */
