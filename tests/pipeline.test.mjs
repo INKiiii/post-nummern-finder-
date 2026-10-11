@@ -7,7 +7,7 @@ import { writePbf } from '../scripts/lib/pbf-writer.mjs';
 import { makeSyntheticTown } from '../scripts/lib/synthetic.mjs';
 import { loadOsmPbf } from '../scripts/lib/sources/osm-pbf.mjs';
 import { mergeAddresses, attachBuildings, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
-import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets } from '../src/shared/lookup.js';
+import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets, preferNearby } from '../src/shared/lookup.js';
 import { distanceM } from '../src/shared/geo.js';
 
 let pkgs;
@@ -239,6 +239,50 @@ describe('Suche und Lage (App-Logik)', () => {
     const r = findHouse(idx.streets.get(e0.id), '42');
     expect(r.match.user).toBe(true);
     expect(r.lat).toBeCloseTo(lat, 9);
+  });
+
+  it('trennt eine Straße mit doppelter Nummernfolge nach Gemeinde (zweimal Nr. 5)', () => {
+    const all = pkgs.flatMap((p) => p.streets.filter((s) => s.n === 'Deichweg'));
+    const ids = new Set(all.map((s) => s.id));
+    expect(ids.size).toBe(2);
+    const byPlace = new Map(all.map((s) => [s.p, s]));
+    expect([...byPlace.keys()].sort()).toEqual(['Beispielhausen', 'Musterdorf']);
+    for (const s of byPlace.values()) {
+      expect(s.h.length).toBe(20);
+      expect(s.l.length).toBeGreaterThan(0); // jeder Teil hat seine eigene Linie
+    }
+    const idx = buildIndex(pkgs);
+    const west = [...idx.streets.values()].find((s) => s.name === 'Deichweg' && s.place === 'Musterdorf');
+    const east = [...idx.streets.values()].find((s) => s.name === 'Deichweg' && s.place === 'Beispielhausen');
+    const [xw] = town.proj.toXY(...[findHouse(west, '5')].map((r) => [r.lat, r.lon])[0]);
+    const [xe] = town.proj.toXY(...[findHouse(east, '5')].map((r) => [r.lat, r.lon])[0]);
+    expect(xw).toBeLessThan(-500);
+    expect(xe).toBeGreaterThan(500);
+  });
+
+  it('Sicherheitsnetz: doppelte Nummer in einer Straße -> nächste zum Standort, mit Hinweis', () => {
+    const [la1, lo1] = town.proj.toLatLon(-600, 0);
+    const [la2, lo2] = town.proj.toLatLon(600, 0);
+    const st = {
+      lines: [],
+      numbers: [
+        { label: '95', norm: '95', num: 95, suffix: '', to: null, lat: la1, lon: lo1 },
+        { label: '95', norm: '95', num: 95, suffix: '', to: null, lat: la2, lon: lo2 },
+      ],
+    };
+    const nearEast = town.proj.toLatLon(500, 0);
+    const r = findHouse(st, '95', nearEast);
+    expect(r.ambiguous).toBe(true);
+    expect(r.lat).toBeCloseTo(la2, 9);
+    expect(findHouse(st, '95', town.proj.toLatLon(-500, 0)).lat).toBeCloseTo(la1, 9);
+  });
+
+  it('gleichnamige Straßen: die am Standort zuerst (Suche und Sprache)', () => {
+    const idx = buildIndex(pkgs);
+    const res = searchStreets(idx, 'Deichweg', 5).filter((s) => s.name === 'Deichweg');
+    expect(res.length).toBe(2);
+    expect(preferNearby(res, town.proj.toLatLon(600, -600))[0].place).toBe('Beispielhausen');
+    expect(preferNearby(res, town.proj.toLatLon(-600, -600))[0].place).toBe('Musterdorf');
   });
 });
 

@@ -12,7 +12,8 @@ export const buildIndex = L.buildIndex as unknown as (
   user?: { points?: UserPoint[]; streets?: UserStreet[] },
 ) => Index;
 export const searchStreets = L.searchStreets as unknown as (index: Index, q: string, limit?: number) => Street[];
-export const findHouse = L.findHouse as unknown as (street: Street, input: string) => FindResult;
+export const findHouse = L.findHouse as unknown as (street: Street, input: string, near?: [number, number] | null) => FindResult;
+export const preferNearby = L.preferNearby as unknown as (streets: Street[], near: [number, number] | null) => Street[];
 export const sortedNumbers = L.sortedNumbers as unknown as (street: Street) => Street['numbers'];
 export const streetMidpoint = L.streetMidpoint as unknown as (street: Street) => [number, number] | null;
 export const PACKAGE_FORMAT: string = L.PACKAGE_FORMAT;

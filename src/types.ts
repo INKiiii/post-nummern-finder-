@@ -45,6 +45,8 @@ export interface FindResult {
   estimated: boolean;
   /** Geschätzte Lage wurde auf ein Gebäude ohne Hausnummer gesetzt */
   snapped?: boolean;
+  /** Nummer gibt es mehrfach weit auseinander in dieser Straße; die nächste wurde gewählt */
+  ambiguous?: boolean;
   match?: HouseNumber;
   neighbors: HouseNumber[];
 }

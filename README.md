@@ -36,6 +36,7 @@ OpenStreetMap ist nicht überall vollständig. Der Build holt deshalb alles hera
 
 * **Interpolationslinien** (`addr:interpolation`): Wo in OSM nur Anfangs- und Endnummer mit einer Linie dazwischen eingetragen sind, werden die Nummern dazwischen erzeugt. In der App sind sie „geschätzt“ markiert („Lage aus OSM-Interpolationslinie“).
 * **Gebäude ohne Hausnummer:** Wohngebäude ohne Nummer werden der nächsten Straße zugeordnet. Fehlt eine Nummer, setzt die App die geschätzte Lage auf das passende Gebäude derselben Straßenseite („auf Gebäude ohne Nummer gesetzt“). Auf der Karte erscheinen diese Gebäude als kleine Quadrate. Beim langen Drücken rastet ein eigener Punkt auf das Gebäude ein.
+* **Straßen durch mehrere Gemeinden mit eigener Nummernfolge** (z. B. Elbuferstraße in Tespe und in Marschacht, beide mit einer Nr. 95) werden nach Gemeinde getrennt (notfalls nach Ortsteil oder PLZ), samt Straßenlinie. In der Suche stehen sie mit Ort, die am aktuellen Standort zuerst. Gibt es eine Nummer trotzdem mehrfach in einer Straße, wählt die App die nächstgelegene und zeigt „⚠ Nr. … gibt es mehrfach“.
 * **Doppelte Straßen:** Abgetrennte Stücke ohne Hausnummern (z. B. Feldweg-Fortsetzungen) werden mit der gleichnamigen Straße bis 1,5 km Entfernung zusammengeführt.
 * **Wege ohne Häuser:** Straßen ohne Nummern **und** ohne Wohngebäude (Feld- und Deichwege) gelten nicht als Lücke. Sie heißen in der App „Weg ohne Häuser“ und stehen im Bericht am Ende. Echte Lücken („keine Hausnummern, N Gebäude“) stehen ganz oben in `report.csv`.
 

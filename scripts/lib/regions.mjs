@@ -242,7 +242,7 @@ export function buildStreets(segments, addresses) {
     }
     // 3) Abgetrennte Stücke ohne Hausnummern (z. B. Feldweg-Fortsetzung) gehören zur
     //    gleichnamigen Straße in der Nähe (bis 1,5 km): zusammenführen statt doppelt anzeigen.
-    const merged = mergeEmptyClusters(list, 1500);
+    const merged = mergeEmptyClusters(list, 1500).flatMap((c) => splitByMunicipality(c));
     for (const c of merged) {
       const chains = c.segs.length ? mergeChains(c.segs).map((l) => simplifyLine(l)) : [];
       streets.push({
@@ -300,6 +300,116 @@ export function attachDriveways(streets, drivewaySegments) {
     attached++;
   }
   return attached;
+}
+
+/**
+ * Zählt Hausnummern, die in einer Adressliste mehrfach an weit auseinanderliegenden
+ * Stellen (> 150 m) vorkommen – Zeichen für zwei getrennte Nummernfolgen.
+ */
+export function farDuplicates(addrs) {
+  const byNum = new Map();
+  for (const a of addrs) {
+    const k = normHouseNumber(a.housenumber);
+    const l = byNum.get(k);
+    l ? l.push(a) : byNum.set(k, [a]);
+  }
+  let n = 0;
+  for (const l of byNum.values()) {
+    if (l.length < 2) continue;
+    if (l.some((a, i) => l.some((b, j) => j > i && distanceM(a.lat, a.lon, b.lat, b.lon) > 150))) n++;
+  }
+  return n;
+}
+
+/**
+ * Trennt eine Straße, die durch mehrere Gemeinden (oder Ortsteile) läuft und dort jeweils
+ * eigene Nummern hat (z. B. Elbuferstraße in Tespe und in Marschacht: zweimal Nr. 95).
+ * Getrennt wird nach addr:city, notfalls nach Ortsteil oder PLZ – nur wenn das die
+ * doppelten Nummern tatsächlich auflöst. Wegstücke gehen an den Teil mit den nächsten Adressen.
+ */
+export function splitByMunicipality(c) {
+  const addrs = c.addrs;
+  if (addrs.length < 6) return [c];
+  const baseline = farDuplicates(addrs);
+  if (baseline < 3) return [c];
+  const keyFns = [
+    (a) => (a.city || '').trim().toLowerCase(),
+    (a) => ((a.city || '') + '|' + (a.suburb || '')).trim().toLowerCase(),
+    (a) => (a.postcode || '').trim(),
+  ];
+  for (const keyFn of keyFns) {
+    const groups = new Map();
+    const unkeyed = [];
+    for (const a of addrs) {
+      const k = keyFn(a);
+      if (!k || k === '|') unkeyed.push(a);
+      else (groups.get(k) ?? groups.set(k, []).get(k)).push(a);
+    }
+    const big = [...groups.values()].filter((g) => g.length >= 3);
+    if (big.length < 2) continue;
+    const remaining = [...groups.values()].reduce((n, g) => n + farDuplicates(g), 0);
+    if (remaining > baseline * 0.2) continue;
+    // Adressen ohne Ort/PLZ: zur Gruppe der nächsten Adresse
+    const keyed = [...groups.entries()].flatMap(([k, g]) => g.map((a) => [k, a]));
+    const nearestKey = (lat, lon) => {
+      let best = null;
+      let bestD = Infinity;
+      for (const [k, a] of keyed) {
+        const d = (a.lat - lat) ** 2 + ((a.lon - lon) * 0.6) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+        }
+      }
+      return best;
+    };
+    for (const a of unkeyed) groups.get(nearestKey(a.lat, a.lon)).push(a);
+    const parts = new Map([...groups.keys()].map((k) => [k, { ...c, segs: [], addrs: groups.get(k), names: [] }]));
+    // Wegstücke an der Grenze teilen: jeder Punkt gehört zum Teil mit der nächsten Adresse.
+    // Wechselt der Teil zwischen zwei Stützpunkten, wird der Grenzpunkt per Halbierung gesucht.
+    let synthId = -1;
+    for (const seg of c.segs) {
+      const keys = seg.pts.map(([la, lo]) => nearestKey(la, lo));
+      let curKey = keys[0];
+      let pts = [seg.pts[0]];
+      let ids = [seg.nodeIds[0]];
+      const flush = () => {
+        if (pts.length >= 2) {
+          const part = parts.get(curKey);
+          part.segs.push({ ...seg, nodeIds: ids, pts });
+          part.names.push(seg.name);
+        }
+      };
+      for (let i = 1; i < seg.pts.length; i++) {
+        if (keys[i] !== curKey) {
+          let lo = seg.pts[i - 1];
+          let hi = seg.pts[i];
+          for (let k = 0; k < 16; k++) {
+            const m = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2];
+            if (nearestKey(m[0], m[1]) === curKey) lo = m;
+            else hi = m;
+          }
+          const cut = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2];
+          const cutId = synthId--;
+          pts.push(cut);
+          ids.push(cutId);
+          flush();
+          curKey = keys[i];
+          pts = [cut];
+          ids = [cutId];
+        }
+        pts.push(seg.pts[i]);
+        ids.push(seg.nodeIds[i]);
+      }
+      flush();
+    }
+    return [...parts.values()].map((p) => ({
+      ...p,
+      bbox: bboxOfPts([...p.segs.flatMap((sg) => sg.pts), ...p.addrs.map((a) => [a.lat, a.lon])]),
+      pointsOnly: !p.segs.length,
+    }));
+  }
+  return [c];
 }
 
 /** Führt Cluster ohne Adressen mit dem nächsten gleichnamigen Cluster (bis maxM) zusammen. */

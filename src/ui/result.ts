@@ -18,7 +18,8 @@ import { deletePhoto, getPhoto, savePhoto, shrinkImage } from '../photos';
 import type { FindResult, Street } from '../types';
 
 function statusNote(res: FindResult, number: string): string {
-  const base = statusBase(res, number);
+  let base = statusBase(res, number);
+  if (res.ambiguous) base = `⚠ Nr. ${number} gibt es mehrfach in dieser Straße – die nächstgelegene ist gewählt${base ? ' · ' + base : ''}`;
   if (res.snapped) return `${base} · auf Gebäude ohne Nummer gesetzt`;
   return base;
 }
@@ -56,7 +57,8 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   }
   let street: Street = found;
   const number = params.number ?? '';
-  let res = findHouse(street, number || '');
+  const near = (): [number, number] | null => (gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
+  let res = findHouse(street, number || '', near());
   if (number) void remember({ streetId: street.id, streetName: street.name, place: street.place, number });
 
   const distEl = h('div', { class: 'dist' }, '–');
@@ -281,7 +283,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const refresh = () => {
     // Nach dem Speichern eigener Punkte wird der Index neu aufgebaut
     street = state.index.streets.get(street.id) ?? street;
-    res = findHouse(street, number);
+    res = findHouse(street, number, near());
     drive = number ? drivewayFor(street, number, res) : null;
     renderNote();
     map.update({

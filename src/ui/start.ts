@@ -4,7 +4,7 @@ import { h, toast } from './dom';
 import { keypad } from './keypad';
 import { show } from './app';
 import { state } from '../data';
-import { nearestStreets, searchStreets } from '../core';
+import { nearestStreets, preferNearby, searchStreets } from '../core';
 import { gps } from '../gps';
 import { locationDeniedBox } from './location';
 import { backupState, backupUserData, BACKUP_DAYS } from '../exportimport';
@@ -158,7 +158,8 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
       );
       return;
     }
-    const res = searchStreets(state.index, q, 7);
+    // Gleichnamige Straßen (z. B. Elbuferstraße in Tespe und Marschacht): die nahe zuerst
+    const res = preferNearby(searchStreets(state.index, q, 7), gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
     const items: HTMLElement[] = res.map((s) =>
       h(
         'button',
@@ -178,7 +179,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   input.addEventListener('focus', renderSuggestions);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
-      const first = searchStreets(state.index, input.value, 1)[0];
+      const first = preferNearby(searchStreets(state.index, input.value, 7), gps.fix ? [gps.fix.lat, gps.fix.lon] : null)[0];
       if (first) choose(first);
     }
   });
