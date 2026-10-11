@@ -108,6 +108,8 @@ export function parseSpokenAddress(text: string): SpokenAddress {
       const street = tokens.slice(0, start).join(' ');
       return { street, number: tn.num + (suffix || tn.suffix) };
     }
+    // Nur eine Nummer gesagt ("zweiundvierzig"): Straße bleibt die gewählte
+    if (tn && start === 0) return { street: '', number: tn.num + (suffix || tn.suffix) };
   }
   return { street: tokens.slice(0, end).join(' ') + (suffix ? ` ${suffix}` : ''), number: null };
 }

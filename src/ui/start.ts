@@ -194,10 +194,19 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   };
 
   const voice = async () => {
-    const r = await listenForAddress();
+    const r = await listenForAddress(
+      street ? `Nummer sagen (${street.name}) – oder Straße und Nummer` : 'z. B. „Elbuferstraße zweiundvierzig“',
+    );
     if (!r) return;
     if (r.street && r.number) {
       show('result', { streetId: r.street.id, number: r.number });
+    } else if (!r.street && r.number && street) {
+      // Nur Nummer gesagt: gewählte Straße (vorsortierte Briefe)
+      show('result', { streetId: street.id, number: r.number });
+    } else if (!r.street && r.number) {
+      number = r.number;
+      renderNumber();
+      toast('Nummer erkannt. Bitte Straße wählen.');
     } else if (r.street) {
       choose(r.street);
       toast(`Straße erkannt. Hausnummer bitte eintippen.`);

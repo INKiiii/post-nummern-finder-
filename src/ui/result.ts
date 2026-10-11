@@ -13,6 +13,8 @@ import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../h
 import { remember } from '../recents';
 import { speechSupported } from '../voice';
 import { locationDeniedBox } from './location';
+import { ApproachAlert, setSoundEnabled, soundEnabled, unlockAudio } from '../approach';
+import { deletePhoto, getPhoto, savePhoto, shrinkImage } from '../photos';
 import type { FindResult, Street } from '../types';
 
 function statusNote(res: FindResult, number: string): string {
@@ -63,6 +65,11 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const noteEl = h('div', { class: 'note' });
   const placeEl = h('div', { class: 'note place-note' });
   const driveEl = h('div', { class: 'drive-guide' });
+  const approachEl = h('div', { class: 'approach', role: 'alert' });
+  approachEl.hidden = true;
+  const alert = new ApproachAlert();
+  let approachTimer = 0;
+  const photoEl = h('div', { class: 'photo-strip' });
   const deniedEl = locationDeniedBox();
   deniedEl.hidden = true;
   let drive: ReturnType<typeof drivewayFor> = null;
@@ -78,7 +85,6 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       ...[
         res.estimated && res.status !== 'none' ? h('span', { class: 'badge-est' }, 'geschätzt') : null,
         txt ? h('span', null, ' ' + txt) : null,
-        res.estimated && number ? h('span', { class: 'muted' }, ' · lang auf Karte drücken zum Setzen') : null,
       ].filter((x): x is HTMLSpanElement => !!x),
     );
     noteEl.hidden = !txt && !res.estimated;
@@ -105,10 +111,111 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       infoCard.append(h('div', { class: 'info-head' }, first), ...rest.map((l) => h('div', { class: 'info-line' }, l)), h('div', { class: 'info-edit' }, '✎'));
       infoCard.classList.remove('empty');
     } else {
-      infoCard.append(h('div', { class: 'info-empty' }, '+ Haus-Info: Eingänge & Briefkästen'));
+      infoCard.append(h('div', { class: 'info-empty' }, '+ Haus-Info (Eingänge, Briefkästen)'));
       infoCard.classList.add('empty');
     }
   };
+  const renderPhoto = () => {
+    const p = number ? getPhoto(houseKey(street, number)) : undefined;
+    photoEl.replaceChildren();
+    photoEl.hidden = !p;
+    if (p) photoEl.append(h('button', { class: 'photo-thumb', onClick: () => showPhoto() }, h('img', { src: p.dataUrl, alt: `Foto ${street.name} ${number}` })));
+  };
+
+  const takePhoto = () => {
+    const input = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true }) as HTMLInputElement;
+    document.body.appendChild(input);
+    input.addEventListener('change', async () => {
+      const f = input.files?.[0];
+      input.remove();
+      if (!f) return;
+      try {
+        await savePhoto(houseKey(street, number), await shrinkImage(f));
+        renderPhoto();
+        toast('Foto gespeichert.');
+      } catch {
+        toast('Foto konnte nicht gespeichert werden.');
+      }
+    });
+    input.click();
+  };
+
+  const showPhoto = () => {
+    const p = getPhoto(houseKey(street, number));
+    if (!p) return;
+    const close = overlay(
+      h(
+        'div',
+        { class: 'photo-view' },
+        h('img', { src: p.dataUrl, alt: `Foto ${street.name} ${number}` }),
+        h(
+          'div',
+          { class: 'row' },
+          h('button', { class: 'btn big', onClick: () => (close(), takePhoto()) }, '📷 Neues Foto'),
+          h(
+            'button',
+            {
+              class: 'btn big danger',
+              onClick: async () => {
+                if (await confirmBig('Foto löschen?', 'Löschen')) {
+                  await deletePhoto(p.key);
+                  close();
+                  renderPhoto();
+                }
+              },
+            },
+            'Löschen',
+          ),
+        ),
+        h('button', { class: 'btn big primary', onClick: () => close() }, 'Schließen'),
+      ),
+    );
+  };
+
+  // "Hier ist es": aktuelle GPS-Position als Einfahrt bzw. Briefkasten speichern, Foto aufnehmen
+  const hereMenu = () => {
+    const fix = gps.fix;
+    const acc = fix ? Math.round(fix.accuracy) : null;
+    const saveHere = async (kind: 'driveway' | 'number') => {
+      if (!fix) {
+        toast('Kein GPS – bitte kurz warten.');
+        return;
+      }
+      if (fix.accuracy > 30 && !(await confirmBig(`GPS ist gerade ungenau (±${acc} m). Trotzdem speichern?`, 'Speichern'))) return;
+      const existing = state.points.find(
+        (p) => (p.kind ?? 'number') === kind && p.streetName === street.name && normHouseNumber(p.number) === normHouseNumber(number),
+      );
+      await savePoint({
+        id: existing?.id ?? uid(),
+        kind,
+        streetId: street.id,
+        streetName: street.name,
+        number,
+        plz: street.plz,
+        lat: fix.lat,
+        lon: fix.lon,
+        created: existing?.created ?? Date.now(),
+        updated: Date.now(),
+      });
+      close();
+      toast(kind === 'driveway' ? `Einfahrt zu ${number} gespeichert.` : `${street.name} ${number}: Lage gespeichert.`);
+      refresh();
+    };
+    const close = overlay(
+      h(
+        'div',
+        { class: 'dialog' },
+        h('h2', null, `${street.name} ${number}`),
+        h('p', { class: 'muted' }, acc !== null ? `Speichert deine aktuelle Position (GPS ±${acc} m).` : 'Warte auf GPS …'),
+        h('button', { class: 'btn big primary', onClick: () => saveHere('driveway') }, '📍 Hier ist die Einfahrt'),
+        h('button', { class: 'btn big primary', onClick: () => saveHere('number') }, '📍 Hier ist der Briefkasten / das Haus'),
+        h('button', { class: 'btn big', onClick: () => (close(), takePhoto()) }, getPhoto(houseKey(street, number)) ? '📷 Foto ersetzen' : '📷 Foto vom Haus'),
+        h('p', { class: 'muted small' }, 'Foto bleibt nur auf diesem iPhone. Bitte keine Personen oder Autokennzeichen fotografieren.'),
+        h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
+      ),
+    );
+  };
+
   infoCard.addEventListener('click', () =>
     openEditor(street, number, getHouseInfo(houseKey(street, number)) ?? emptyHouseInfo(street, number), renderInfo),
   );
@@ -153,7 +260,22 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       const side = gj.side === 'links' ? 'links' : gj.side === 'rechts' ? 'rechts' : gj.side === 'geradeaus' ? 'geradeaus' : '';
       driveEl.textContent = gj.distance < 10 ? 'Einfahrt: hier abbiegen' : `Einfahrt in ${formatDistance(gj.distance)}${side ? ' ' + side : ''}${gj.behind ? ' (hinter dir)' : ''}`;
       driveEl.hidden = false;
-    } else driveEl.hidden = true;
+      announce(gj.distance, gj.behind, 'EINFAHRT', side);
+    } else {
+      driveEl.hidden = true;
+      announce(g.distance, g.behind, 'HAUS', g.side === 'links' || g.side === 'rechts' ? g.side : '');
+    }
+  };
+
+  // Ton + großer Hinweis bei 50 m und 15 m vor Einfahrt bzw. Haus
+  const announce = (dist: number, behind: boolean, what: string, side: string) => {
+    const stage = alert.update(dist, behind);
+    if (!stage) return;
+    approachEl.textContent = stage === 'near' ? `${what} JETZT${side ? ' ' + side.toUpperCase() : ''}` : `${what} in ${formatDistance(dist)}${side ? ' ' + side : ''}`;
+    approachEl.className = 'approach' + (stage === 'near' ? ' near' : '');
+    approachEl.hidden = false;
+    clearTimeout(approachTimer);
+    approachTimer = window.setTimeout(() => (approachEl.hidden = true), 3000);
   };
 
   const refresh = () => {
@@ -175,10 +297,18 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   // Lang auf die Karte tippen: Hausnummer hier setzen (Lücken selbst schließen)
   map.onLongPress = (lat, lon) => longPressMenu(street, lat, lon, number, drive, refresh);
 
+  // Briefe sind vorsortiert: Straße bleibt gewählt, nur noch die Nummer sagen/tippen
   const nextLetter = () => {
-    if (speechSupported()) show('start', { listen: true }, false);
-    else show('start', {}, false);
+    unlockAudio();
+    show('start', { listen: speechSupported(), streetId: street.id }, false);
   };
+  const soundBtn = h('button', { class: 'btn sound', 'aria-label': 'Ton an/aus' }, soundEnabled() ? '🔔' : '🔕');
+  soundBtn.addEventListener('click', () => {
+    setSoundEnabled(!soundEnabled());
+    soundBtn.textContent = soundEnabled() ? '🔔' : '🔕';
+    unlockAudio();
+    toast(soundEnabled() ? 'Ton bei Annäherung an' : 'Ton aus');
+  });
 
   root.append(
     h(
@@ -191,17 +321,22 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         h('div', { class: 'addr' }, `${street.name} ${number}`.trim()),
         h('div', { class: 'addr-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
       ),
+      soundBtn,
     ),
+    approachEl,
     h('section', { class: 'guidance' }, deniedEl, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
     infoCard,
+    photoEl,
     map.root,
     h(
       'footer',
-      { class: 'bottombar' },
+      { class: 'bottombar row' },
+      number ? h('button', { class: 'btn huge here', onClick: hereMenu }, '📍 Hier') : null,
       h('button', { class: 'btn huge primary', onClick: nextLetter }, speechSupported() ? '🎤 Nächster Brief' : 'Nächster Brief'),
     ),
   );
   renderInfo();
+  renderPhoto();
   refresh();
   const unsub = gps.subscribe((fix, err) => {
     renderGuidance(fix, err);

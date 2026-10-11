@@ -29,7 +29,7 @@ export interface VoiceResult {
 }
 
 /** Hört zu und gibt Straße/Nummer zurück (oder null bei Abbruch/Fehler). */
-export async function listenForAddress(): Promise<VoiceResult | null> {
+export async function listenForAddress(hint = 'z. B. „Elbuferstraße zweiundvierzig“'): Promise<VoiceResult | null> {
   let closed = false;
   const close = overlay(
     h(
@@ -37,7 +37,7 @@ export async function listenForAddress(): Promise<VoiceResult | null> {
       { class: 'listening' },
       h('div', { class: 'mic-pulse' }, '🎤'),
       h('p', { class: 'big-text' }, 'Ich höre zu …'),
-      h('p', { class: 'muted' }, 'z. B. „Elbuferstraße zweiundvierzig“'),
+      h('p', { class: 'muted' }, hint),
       h(
         'button',
         {
@@ -59,9 +59,14 @@ export async function listenForAddress(): Promise<VoiceResult | null> {
     let fallback: VoiceResult | null = null;
     for (const alt of alts) {
       const p = parseSpokenAddress(alt);
+      if (!p.street && p.number) {
+        // Nur Nummer: gilt für die bereits gewählte Straße
+        if (!fallback || !fallback.street) fallback = { street: null, number: p.number, heard: alt };
+        continue;
+      }
       const street = matchSpokenStreet(p.street);
       if (street && p.number) return { street, number: p.number, heard: alt };
-      if (street && !fallback) fallback = { street, number: null, heard: alt };
+      if (street && (!fallback || !fallback.street)) fallback = { street, number: null, heard: alt };
     }
     return fallback ?? { street: null, number: null, heard: alts[0] ?? '' };
   } catch (e) {
