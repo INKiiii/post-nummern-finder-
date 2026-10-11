@@ -173,3 +173,29 @@ describe('Lücken im Moment des Fundes schließen', () => {
     expect(findHouse(e(), '17').estimated).toBe(true);
   });
 });
+
+describe('Export/Import der eigenen Daten', () => {
+  it('Sicherung enthält Haus-Infos und Punkte, keine Fotos; Import verwirft Namen und Fotos', async () => {
+    const { exportUserData, importUserData } = await import('../src/exportimport');
+    const { saveHouseInfo, getHouseInfo } = await import('../src/houseinfo');
+    const { countOldPhotos } = await import('../src/photos');
+    const e = street('Elbuferstraße');
+    await saveHouseInfo({ key: '00001|elbuferstrasse|42', street: e.name, number: '42', plz: '00001', place: e.place, access: 'Einfahrt links', entrances: [{ pos: 'hinten', boxes: 2 }], note: 'Hund', updated: 0 });
+    const data = await exportUserData();
+    expect(data.houseinfo.some((x) => x.note === 'Hund')).toBe(true);
+    expect('photos' in data).toBe(false);
+    const incoming = {
+      ...data,
+      houseinfo: [
+        { ...data.houseinfo[0], note: 'Herr Meier wohnt hinten', updated: Date.now() + 1000 },
+        { key: '00001|elbuferstrasse|44', street: e.name, number: '44', plz: '00001', place: e.place, access: null, entrances: [], note: 'Tor', updated: 5 },
+      ],
+      photos: [{ key: 'x', dataUrl: 'data:image/png;base64,AAAA', updated: 1 }],
+    };
+    const r = await importUserData(JSON.stringify(incoming));
+    expect(r.namesRemoved).toBe(1);
+    expect(getHouseInfo('00001|elbuferstrasse|42')?.note).toBe('');
+    expect(getHouseInfo('00001|elbuferstrasse|44')?.note).toBe('Tor');
+    expect(await countOldPhotos()).toBe(0);
+  });
+});

@@ -1,0 +1,243 @@
+#!/usr/bin/env node
+// Browsertests in Handygröße mit simulierter GPS-Fahrt im erfundenen Testgebiet „Musterdorf“.
+// Baut die App in einen temporären Ordner, legt die Demo-Gebiete dazu, startet einen kleinen
+// Server und fährt mit einem simulierten GPS (Position, Genauigkeit, Geschwindigkeit, Kurs).
+//
+//   npm run test:browser
+//
+// Szenarien: lange Straße, Kurve, Kreuzung, Abbiegen, Umkehr (Schritttempo), Haus in zweiter
+// Reihe, fehlende Nummer, Straße über zwei PLZ-Gebiete, Vorbeifahren, Eingabesperre bei Fahrt,
+// Stillstand ohne Springen. Echte Geräte verhalten sich anders (GPS-Rauschen, iOS) – siehe README.
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { chromium, devices } from 'playwright';
+import { makeProjection } from '../../src/shared/geo.js';
+import { SYNTH_ORIGIN } from '../../scripts/lib/synthetic.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hnf-browser-'));
+const dist = path.join(tmp, 'dist');
+const quiet = { cwd: ROOT, stdio: ['ignore', 'ignore', 'inherit'] };
+
+// ---------- Bauen und ausliefern ----------
+execFileSync(process.execPath, [path.join(ROOT, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', dist, '--emptyOutDir', '--logLevel', 'error'], quiet);
+fs.rmSync(path.join(dist, 'regions'), { recursive: true, force: true });
+execFileSync(process.execPath, ['scripts/make-demo-data.mjs', '--out', path.join(dist, 'regions')], { cwd: ROOT, stdio: 'ignore' });
+
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.gz': 'application/gzip', '.webmanifest': 'application/manifest+json', '.mp4': 'video/mp4' };
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://x');
+  let file = path.join(dist, decodeURIComponent(url.pathname));
+  if (!file.startsWith(dist)) return res.writeHead(403).end();
+  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
+  if (!fs.existsSync(file)) return res.writeHead(404).end();
+  res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
+});
+await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const BASE = `http://127.0.0.1:${server.address().port}/`;
+
+// ---------- Simuliertes GPS ----------
+const proj = makeProjection(SYNTH_ORIGIN[0], SYNTH_ORIGIN[1]);
+const fakeGeolocation = () => {
+  const watchers = new Map();
+  let id = 0;
+  let last = null;
+  const geo = {
+    watchPosition(ok) {
+      const i = ++id;
+      watchers.set(i, ok);
+      if (last) setTimeout(() => ok(last), 0);
+      return i;
+    },
+    clearWatch(i) {
+      watchers.delete(i);
+    },
+    getCurrentPosition(ok) {
+      if (last) ok(last);
+    },
+  };
+  Object.defineProperty(navigator, 'geolocation', { value: geo, configurable: true });
+  window.__fix = (latitude, longitude, accuracy, speed, heading) => {
+    last = { coords: { latitude, longitude, accuracy, speed, heading, altitude: null, altitudeAccuracy: null }, timestamp: Date.now() };
+    for (const ok of watchers.values()) ok(last);
+  };
+};
+
+/** Pseudo-Zufall mit festem Startwert */
+let seed = 42;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+
+/**
+ * Fährt einen Weg (x/y in Metern im Testgebiet) ab.
+ * Schritttempo: Geschwindigkeit 1,2 m/s und unbrauchbarer Kurs (wie echte Geräte im Schritttempo).
+ */
+async function drive(page, pts, { speed = 1.2, step = 6, noise = 2.5, acc = 6 } = {}) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[i + 1];
+    const len = Math.hypot(bx - ax, by - ay);
+    const course = ((Math.atan2(bx - ax, by - ay) * 180) / Math.PI + 360) % 360;
+    for (let d = 0; d < len; d += step) {
+      const f = d / len;
+      const [lat, lon] = proj.toLatLon(ax + (bx - ax) * f + (rnd() - 0.5) * 2 * noise, ay + (by - ay) * f + (rnd() - 0.5) * 2 * noise);
+      const heading = speed >= 2.5 ? course : rnd() * 360;
+      await page.evaluate(([a, b, c, s, h]) => window.__fix(a, b, c, s, h), [lat, lon, acc, speed, heading]);
+      await page.waitForTimeout(25);
+    }
+  }
+  await page.waitForTimeout(150);
+}
+async function stand(page, x, y, n = 15, acc = 10) {
+  for (let i = 0; i < n; i++) {
+    const [lat, lon] = proj.toLatLon(x + (rnd() - 0.5) * 8, y + (rnd() - 0.5) * 8);
+    await page.evaluate(([a, b, c, h]) => window.__fix(a, b, c, 0, h), [lat, lon, acc, rnd() * 360]);
+    await page.waitForTimeout(25);
+  }
+  await page.waitForTimeout(150);
+}
+
+// ---------- Prüfungen ----------
+const results = [];
+function check(name, ok, detail = '') {
+  results.push({ name, ok: !!ok, detail });
+  console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` – ${detail}` : ''}`);
+}
+const text = async (page, sel) => ((await page.locator(sel).first().textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
+const nums = async (page, side) => (await text(page, `.lt-${side} .lt-nums`)).split('·').map((s) => s.trim()).filter((s) => s && s !== '–');
+const parity = (list) => list.map((l) => Number.parseInt(l, 10) % 2);
+const ascending = (list) => list.every((v, i) => !i || Number.parseInt(v, 10) >= Number.parseInt(list[i - 1], 10));
+const descending = (list) => list.every((v, i) => !i || Number.parseInt(v, 10) <= Number.parseInt(list[i - 1], 10));
+
+async function setTarget(page, nr) {
+  await page.click('.lb-search');
+  await page.waitForSelector('.screen-search');
+  await page.locator('.near-card').click({ timeout: 2000 }).catch(() => {});
+  for (const c of nr) await page.click(`.keys .key >> text="${c}"`);
+  await page.click('.key.enter');
+  await page.waitForSelector('.screen-live');
+  await page.waitForTimeout(150);
+}
+
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
+const errors = [];
+async function freshPage() {
+  const ctx = await browser.newContext({ ...devices['iPhone 14 Pro'], viewport: { width: 393, height: 760 }, locale: 'de-DE', serviceWorkers: 'block' });
+  await ctx.addInitScript(fakeGeolocation);
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(BASE);
+  await page.fill('.screen-regions input.search', '0000');
+  for (const n of ['00001 Musterdorf', '00002 Beispielhausen']) {
+    await page.locator('.region', { hasText: n }).locator('button', { hasText: 'Herunterladen' }).click();
+    await page.waitForSelector(`.region-list >> nth=0 >> text=${n}`);
+  }
+  await page.click('text=Zurück');
+  await page.waitForSelector('.screen-live');
+  return { ctx, page };
+}
+
+try {
+  // 1. Lange Straße im Schritttempo, Kreuzung, zwei PLZ-Gebiete
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-900, -3], [-760, -3]]);
+    const l = await nums(page, 'left');
+    const r = await nums(page, 'right');
+    check('Lange Straße (Schritttempo): Straße erkannt', (await text(page, '.lt-street')) === 'Elbuferstraße');
+    check('Lange Straße: links ungerade, rechts gerade (Fahrt nach Osten)', l.length === 3 && r.length === 3 && parity(l).every((p) => p === 1) && parity(r).every((p) => p === 0), `links ${l.join(' ')} | rechts ${r.join(' ')}`);
+    check('Lange Straße: Nummern voraus aufsteigend', ascending(l) && ascending(r));
+    await drive(page, [[-760, -3], [-240, -3]], { speed: 1.4, step: 7 });
+    check('Kreuzung (Blumenstraße) geradeaus: Straße bleibt', (await text(page, '.lt-street')) === 'Elbuferstraße');
+    await drive(page, [[-240, -3], [0, -2], [120, 10]], { speed: 1.4, step: 7 });
+    check('Über zwei PLZ-Gebiete: weiterhin dieselbe Straße', (await text(page, '.lt-street')) === 'Elbuferstraße', await text(page, '.lt-place'));
+    // Kurve
+    await drive(page, [[120, 10], [400, 38], [520, 38]], { speed: 1.4, step: 7 });
+    const lk = await nums(page, 'left');
+    check('Kurve: Straße bleibt, Vorschau weiter richtig', (await text(page, '.lt-street')) === 'Elbuferstraße' && parity(lk).every((p) => p === 1), `links ${lk.join(' ')}`);
+    // Umkehr im Schritttempo
+    await drive(page, [[520, 34], [470, 34]]);
+    const lu = await nums(page, 'left');
+    const ru = await nums(page, 'right');
+    check('Umkehr (Schritttempo): Seiten getauscht', parity(lu).every((p) => p === 0) && parity(ru).every((p) => p === 1), `links ${lu.join(' ')} | rechts ${ru.join(' ')}`);
+    check('Umkehr: Reihenfolge jetzt absteigend', descending(lu) && descending(ru));
+    // Stillstand mit springendem GPS
+    const before = await text(page, '.lt-preview');
+    await stand(page, 470, 34);
+    check('Stillstand: Vorschau springt nicht', (await text(page, '.lt-preview')) === before);
+    await ctx.close();
+  }
+
+  // 2. Abbiegen, Ziel auf anderer Straße
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-420, -3], [-302, -3], [-302, 110]], { speed: 5, step: 5 });
+    check('Abbiegen: neue Straße erkannt', (await text(page, '.lt-street')) === 'Blumenstraße');
+    const l = await nums(page, 'left');
+    check('Abbiegen: Seiten passen (Norden: West links)', parity(l).every((p) => p === 1), `links ${l.join(' ')}`);
+    await ctx.close();
+  }
+
+  // 3. Haus in zweiter Reihe, Vorbeifahren, Eingabesperre
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-720, -3], [-680, -3]]);
+    await setTarget(page, '61');
+    await drive(page, [[-680, -3], [-450, -3]], { speed: 6, step: 6 });
+    const side = await text(page, '.live-target .side');
+    check('Zweite Reihe: Führung zur Einfahrt links', side === 'EINFAHRT LINKS', `${await text(page, '.live-target .dist')} ${side}`);
+    check('Eingabesperre bei Fahrt: „Nr. suchen“ gesperrt', await page.locator('.lb-search').isDisabled(), await text(page, '.lb-search'));
+    await drive(page, [[-450, -3], [-400, -3]], { speed: 1, step: 5 });
+    check('Im Stand: „Nr. suchen“ wieder frei', !(await page.locator('.lb-search').isDisabled()));
+    // Haus (2. Reihe) und Einfahrt sichtbar, nicht unter den Knöpfen
+    const box = await page.locator('.map-svg').boundingBox();
+    const t = await page.locator('circle.target').boundingBox();
+    const j = await page.locator('circle.junction').boundingBox();
+    const ctl = await page.locator('.map-ctrl').boundingBox();
+    const inside = (b) => b && b.x >= box.x && b.y >= box.y && b.x + b.width <= box.x + box.width && b.y + b.height <= box.y + box.height;
+    const overlaps = (a, b) => a && b && a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+    check('Zweite Reihe: Haus und Einfahrt im Bild', inside(t) && inside(j));
+    check('Zweite Reihe: Haus nicht unter den Zoomknöpfen', !overlaps(t, ctl));
+    await drive(page, [[-400, -3], [-330, -3]], { speed: 1.2, step: 6 });
+    const passed = await text(page, '.live-target .dist');
+    check('Vorbeigefahren: „Zurück … m“ in Warnfarbe', /^Zurück \d+ m$/.test(passed) && (await page.locator('.live-target.dir-behind').count()) === 1, passed);
+    await ctx.close();
+  }
+
+  // 4. Fehlende Nummer (geschätzt) und eigener Punkt
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-960, -3], [-920, -3]]);
+    await setTarget(page, '17');
+    const tags = await text(page, '.live-target .tags');
+    check('Fehlende Nummer: als „geschätzt“ markiert', tags.includes('geschätzt'), tags);
+    check('Fehlende Nummer: Seite links (ungerade, Fahrt nach Osten)', (await text(page, '.live-target .side')) === 'LINKS');
+    await drive(page, [[-920, -3], [-821, -3]]);
+    await page.click('.lb-here');
+    await page.click('.here-side:has-text("Links")');
+    await page.waitForTimeout(150);
+    const t2 = await text(page, '.live-target .tags');
+    check('„Hier ist Nr. 17“: selbst gesetzt, nicht mehr geschätzt', t2.includes('selbst gesetzt') && !t2.includes('geschätzt'), t2);
+    check('Karte: selbst gesetzter Punkt anders gezeichnet (Quadrat statt Kreis)', (await page.locator('rect.hn-user').count()) === 1);
+    await page.click('.toast-action');
+    await page.waitForTimeout(150);
+    check('Rückgängig: wieder geschätzt', (await text(page, '.live-target .tags')).includes('geschätzt'));
+    await ctx.close();
+  }
+} catch (e) {
+  check('Ablauf ohne Ausnahme', false, String(e?.message ?? e).split('\n')[0]);
+} finally {
+  await browser.close();
+  server.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+check('Keine Fehler in der Seite', errors.length === 0, errors.join(' | '));
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} Browserprüfungen bestanden.`);
+process.exit(failed.length ? 1 : 0);

@@ -1,6 +1,8 @@
 # Hausnummern-Finder
 
-Handy-Webapp (PWA) für Zusteller: Straße wählen oder sagen, Hausnummer eintippen, und die App zeigt Entfernung, Straßenseite (links/rechts aus der Fahrtrichtung) und die eigenen Haus-Infos zu Eingängen und Briefkästen. Gebiete werden einmal heruntergeladen, danach läuft alles offline. Die App speichert keine Kundendaten.
+Handy-Webapp (PWA) für Zusteller. Sie startet in einer **Live-Karte**: Die Position liegt auf der Straße, oben stehen groß die nächsten Hausnummern voraus, getrennt nach linker und rechter Straßenseite. Eine Zielnummer ist optional („Nr. suchen“ im Stand), dazu kommen eigene Haus-Infos zu Eingängen und Briefkästen. Gebiete werden einmal heruntergeladen, danach läuft alles offline (außer der Spracherkennung). Die App speichert keine Kundendaten, keine Fotos und keinen Standortverlauf.
+
+**Leitprinzipien:** Während der Fahrt nur anzeigen (Eingaben ab ~11 km/h gesperrt, keine Pop-ups, keine Animationen). Keine Vorab-Eingabe von Briefen. Offline zuerst. Geschätzte und selbst gesetzte Daten sind als solche erkennbar, die GPS-Ungenauigkeit wird immer gezeigt. Alles bleibt auf dem Gerät.
 
 ## Schnellstart
 
@@ -29,6 +31,7 @@ npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --only 21
 * Ausgabe: `public/regions/<id>.json.gz` und der Index `public/regions/regions.json` (Name, PLZ, Orte, Größe, Datei, Prüfsumme).
 * Im Terminal steht pro Gebiet die Zahl der Straßen, Hausnummern und Straßen ohne Nummern. Mit `--details` kommt pro Straße z. B. `Nummern 1 bis 195 vorhanden (181), es fehlen 17, 23–24, 100–110` bzw. `LÜCKE: keine Hausnummern in den Daten`.
 * PLZ-Pakete sind meist deutlich kleiner als 1 MB (gut für das Handy). Wer größere Pakete möchte, nimmt `--group kreis`.
+* **Gebäudeumrisse** für die Karte (Gebäude mit Adresse und Wohngebäude, auf ~1 m vereinfacht) kommen nur in ein Paket, wenn es dadurch höchstens doppelt so groß wird (`--outlines-max 2`, abschaltbar mit `--outlines off`). Stand Oktober 2026 für Niedersachsen: in 558 von 833 PLZ-Gebieten enthalten, in 270 weggelassen; alle Pakete zusammen 40,8 MB ohne → 67,2 MB mit Umrissen. Die Gesamtzahlen stehen am Ende jedes Builds.
 
 ### Lücken in den Daten: was die App selbst schließt
 
@@ -57,7 +60,7 @@ npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf \
 
 **Automatisch über GitHub:** Unter *Settings › Secrets and variables › Actions › Variables* die Variable `OFFICIAL_ADDR_URL` mit der Download-Adresse der CSV- oder ZIP-Datei anlegen. Optional zeigt `OFFICIAL_ADDR_CONFIG` auf eine eigene Spalten-Konfiguration (Standard: `scripts/sources/niedersachsen-hk.json`). Passt eine Spalte nicht, bricht der Build ab und nennt alle vorhandenen Spalten.
 
-Gleiche Adressen (gleiche Straße und Nummer, weniger als 150 m auseinander) werden zusammengeführt. Die Lage kommt aus der amtlichen Quelle (Reihenfolge mit `--prefer` änderbar). Lizenz und Quellenangabe jeder beteiligten Quelle stehen im Paket und werden in der App unter „Daten“ angezeigt.
+Gleiche Adressen (gleiche Straße und Nummer, weniger als 150 m auseinander) werden zusammengeführt. Die Lage kommt aus der amtlichen Quelle (Reihenfolge mit `--prefer` änderbar). Lizenz und Quellenangabe jeder beteiligten Quelle stehen im Paket und werden in der App unter „Eigene Daten“ und „Einstellungen & Info“ angezeigt.
 
 ## Veröffentlichen und im Auto testen
 
@@ -67,37 +70,57 @@ Auf dem Handy die Pages-Adresse öffnen und „Zum Startbildschirm hinzufügen�
 
 ## Die App
 
-* **Start:** Suchfeld mit Autovervollständigung (tippfehlertolerant, `Str.`/`Straße` egal), zuletzt genutzte Straßen oben, die letzten 5 Adressen als Schnellwahl. Dazu eine große Zahlentastatur mit Buchstaben-Zusatz (12a).
-* **Straße automatisch:** Mit GPS schlägt der Startscreen oben die nächstgelegene Straße (bis 50 m) als großen Knopf vor, an Kreuzungen zusätzlich die zweite. Antippen und nur noch die Nummer eingeben. Die Suche bleibt.
-* **Status:** „✓ Offline bereit · 2 Gebiete“, wenn der Service Worker alle App-Dateien gespeichert hat und mindestens ein Gebiet geladen ist, sonst ein gelber Hinweis.
-* **Standort verweigert:** Statt „–“ erscheint eine rote Anleitung „Standort erlauben: Einstellungen, Datenschutz, Ortungsdienste“ mit den Schritten für iPhone bzw. Android.
-* **Ergebnis:** Entfernung (Luftlinie) und groß **LINKS/RECHTS**. Liegt das Haus mehr als 20 m von der Straße, steht der Abstand dabei. Zufahrten aus OSM (`highway=service` + `service=driveway`) werden eingezeichnet, die Abzweigung ist mit **E** markiert („Einfahrt in 120 m links“). Fehlt eine Zufahrt, setzt man die Einfahrt per langem Drücken selbst; sie wird lokal gespeichert und mit exportiert.
-* **Karte:** Standard ist „Fahrtrichtung oben“ mit leichter Neigung, umschaltbar auf „Norden oben“ (die Wahl wird gemerkt). Mit GPS folgt die Karte dem Auto: Das Auto sitzt im unteren Drittel, die Karte zeigt höchstens ~120 m voraus und zoomt beim Annähern weiter heran. Ist das Ziel weiter weg, zeigt ein Pfeil am Rand Richtung und Entfernung („42 · 340 m“, bei vorhandener Zufahrt „E · …“), statt herauszuzoomen. Haus, Einfahrt und Auto bleiben im Nahbereich immer im Bild, auch bei Häusern in zweiter Reihe. Beschriftet werden nur die Zielnummer und je 3 Nachbarn derselben Straßenseite davor und dahinter, im Umkreis von 40 m um das Auto alle sichtbaren Nummern. Alle anderen Häuser sind kleine Punkte. Beschriftungen überlappen nie; Hausnummern haben Vorrang, Straßennamen weichen entlang der Straße aus oder werden ausgeblendet. Die Knöpfe liegen in einer Leiste unter der Karte.
-* **Straßenseite:** Fährt man auf der Zielstraße, wird die Straßenseite benutzt (stimmt auch in Kurven und bei weit entfernten Zielen), sonst die Richtung zum Ziel. Die Karte ist selbst gezeichnet (SVG, keine Kacheln), mit Postauto in Fahrtrichtung.
-* **Fehlende Nummern:** Fehlende Nummern werden aus den Nachbarn derselben Straßenseite geschätzt und als **geschätzt** markiert („zwischen 15 und 19“).
-* **Haus-Infos:** Zufahrt, Eingänge mit Lage und Briefkastenzahl (Plus/Minus), kurzer Hinweis. Alles zum Antippen. Die Karte zeigt z. B. „42: 2 Eingänge. Rechts: 3 Briefkästen. Links hinten: 2 Briefkästen.“ Hinweise mit erkennbaren Namen werden nicht gespeichert, auch nicht beim Import.
-* **Sprechen:** Mikrofon antippen und „Elbuferstraße zweiundvierzig“ sagen, das Ergebnis erscheint ohne Bestätigung. „Nächster Brief“ hört direkt wieder zu. Die Spracherkennung braucht je nach Browser Internet; die Tastatur geht immer offline.
-* **Lücken schließen:** Lang auf die Karte drücken setzt eine Hausnummer („selbst gesetzt“). Fehlende Straßen legt man über die Suche an: nachzeichnen, beim Fahren aufzeichnen oder nur mit Startpunkt.
-* **Sichern und Teilen:** „Haus-Infos sichern“ (unter „Daten“) speichert Haus-Infos, eigene Punkte, Einfahrten und Straßen als JSON-Datei (Teilen-Menü oder Download). Ist die letzte Sicherung älter als 14 Tage oder gab es noch keine, erinnert der Startscreen daran (nur wenn eigene Daten vorhanden sind). Import unter „Daten“; bei Konflikten gewinnt der neuere Stand.
-* **„📍 Hier“ auf dem Ergebnisscreen:** Am gefundenen Haus einmal tippen: „Hier ist die Einfahrt“ oder „Hier ist der Briefkasten / das Haus“ speichert die aktuelle GPS-Position (Warnung bei ungenauem GPS). Ab dann führt die App genau dorthin. Dazu „Foto vom Haus“: ein Bild der Einfahrt oder des Briefkastens, das bei jedem weiteren Brief an diese Adresse groß erscheint. Fotos bleiben auf dem Gerät und sind Teil der Sicherung.
-* **Annäherung:** 50 m vor der Einfahrt (bzw. dem Haus) ein Ton und ein großer Hinweis „EINFAHRT in 45 m links“, direkt davor zwei Töne und „EINFAHRT JETZT LINKS“. Ton über 🔔 ein-/ausschaltbar. iPhone-Web-Apps können nicht vibrieren; der Ton ist hörbar, wenn der Stummschalter aus ist oder das iPhone mit dem Auto verbunden ist.
-* **Vorsortierte Briefe:** Nach „Nächster Brief“ bleibt die Straße gewählt. Es reicht, nur die Nummer zu sagen („zweiundvierzig“) oder zu tippen.
-* **Updates:** Neue App-Versionen holt die App beim nächsten Neustart (bei der Homebildschirm-App: ganz schließen und neu öffnen). Neue Kartendaten (wöchentlicher Build) lädt sie beim Start mit Internet automatisch nach; eigene Punkte und Haus-Infos bleiben erhalten.
-* **Eigene Punkte haben Vorrang:** Ist eine Nummer in den Daten falsch verortet, gilt nach dem Setzen die eigene Lage.
-* Speicherung nur lokal (IndexedDB). Der Service Worker hält die App offline bereit.
+* **Live-Karte (Hauptbildschirm):** Startet direkt, sobald der Standort da ist. Alle Straßen der geladenen Gebiete als Linien (Tour-Straßen stärker), dünne Gebäudeumrisse (wenn im Paket), Hausnummern an jedem Haus (20 px, dunkler Rand, ohne Überlappung; Vorrang: Ziel, Häuser voraus, dann dahinter). Geschätzte Nummern (OSM-Interpolation) sind kursiv, selbst gesetzte haben einen Punkt („•12“) und ein eckiges Symbol. Fahrzeug im unteren Drittel, ca. 80 m voraus und 20 m zurück; Zoom mit + / − (wird gemerkt). Straßennamen sparsam und nie über Hausnummern.
+* **Straßenbezug statt rohem GPS** (`src/matcher.ts`): Die Position wird auf die wahrscheinlichste Straße gelegt (Tour-Straßen bevorzugt), die Karte richtet sich nach Straßenverlauf und Fahrtrichtung. Bei Schrittgeschwindigkeit oder Stillstand ist der GPS-Kurs unzuverlässig; die Fahrtrichtung kommt dann aus der Bewegung entlang der Straße (mindestens einige Meter), sonst bleibt die letzte sichere Richtung. Im Stand springt nichts. Die Straße wechselt erst, wenn die neue zweimal hintereinander klar besser passt. Straßenname antippen → falsch erkannte Straße korrigieren.
+* **Vorschauleiste:** Straßenname, darunter „◀ LINKS 42 · 44 · 46 | 41 · 43 · 45 RECHTS ▶“ relativ zur Fahrtrichtung. Beim Umkehren drehen sich Seiten und Reihenfolge mit. Bei Tour-Straßen zusätzlich „Tour A · danach …“.
+* **Ziel (optional):** „Nr. suchen“ im Stand. Die Zielkarte zeigt Entfernung entlang der Straße und Seite (bzw. „EINFAHRT LINKS“ bei bekannter Zufahrt), Hinweise wie „geschätzt“, „• selbst gesetzt“, „Haus 70 m von der Straße“ und die Haus-Info. Vorbeigefahren: **„Zurück 12 m“** in Warnfarbe (optional mit Signalton). Liegt das Ziel außerhalb der Karte, zeigt ein Pfeil am Rand Richtung und Entfernung. Ein Haus in zweiter Reihe bleibt sichtbar (Karte verschiebt sich seitlich, zoomt nur begrenzt heraus).
+* **Meine Tour:** Straßen einmal hinzufügen, Teil A oder B zuordnen, Reihenfolge verschieben; „Heute zuerst: A | B“. Pro Straße eine Lückenanzeige („Nummern 1 bis 40, es fehlen 17 und 23“). Oft genutzte Straßen (lokaler Zähler, nur der Name, höchstens einmal pro Tag) werden ab 3 Tagen zur Tour vorgeschlagen. Fehlende Straßen lassen sich anlegen.
+* **Nr. suchen:** Straße vorausgewählt (aktuelle Live-Straße), große Tasten, „Finden“ setzt das Ziel und kehrt zur Karte zurück. Schnelltasten zur letzten Nummer: **−2, +2, gegenüber**. Spracheingabe als Zusatz, mit Tour nur für Tour-Straßen („fünfundneunzig“, „zwölf a“); bei Fehlschlag sofort die Tastatur.
+* **Hier ist Nr. …:** Mit Ziel „Hier“ tippen: Nummer links oder rechts der Straße (Abstand 8/15/25/40 m) oder genau hier setzen, oder „Hier ist die Einfahrt“. Ein Tap, danach „Rückgängig“. Selbst gesetzte Punkte haben Vorrang vor den Grunddaten. Langes Drücken auf die Karte setzt Nummer oder Einfahrt an einer beliebigen Stelle.
+* **Haus-Infos:** Zufahrt, Eingänge mit Lage und Briefkastenzahl, kurzer Hinweis – alles per Knopf. Hinweise mit erkennbaren Personennamen werden nicht gespeichert (auch nicht beim Import).
+* **Bildschirm bleibt an:** Screen Wake Lock; für iPhone-Web-Apps zusätzlich ein stummes Mini-Video als Ausweichweg. Auf dem iPhone funktioniert Wake Lock in Home-Bildschirm-Apps laut WebKit erst ab iOS 18.4 zuverlässig, und ob es wirkt, lässt sich nicht abfragen. Sicher ist: Einstellungen › Anzeige & Helligkeit › Automatische Sperre › Nie.
+* **Hell/Dunkel:** automatisch nach Systemeinstellung, fest wählbar unter Einstellungen. Farbe ist nie das einzige Signal (immer auch Text oder Form).
+* **Status (Menü):** „Offline bereit“, „Update verfügbar – tippen zum Neuladen“ (neue Versionen werden nie mitten in der Tour geladen), „Gebiet unvollständig“, „Sicherung fällig“; ein „!“ am Menüknopf, wenn etwas ansteht. GPS-Genauigkeit immer oben, ab 15 m deutlicher Hinweis.
+* **Speicher und Sicherung:** IndexedDB, dauerhafter Speicher wird angefordert (Status unter „Eigene Daten“). „Haus-Infos sichern“ speichert Haus-Infos, eigene Punkte, Einfahrten, Straßen als JSON-Datei; Erinnerung nach 14 Tagen. Import: bei Konflikten gewinnt der neuere Stand.
+* **Fehlerfälle:** Standort verweigert (Anleitung für iPhone/Android, prüft beim Zurückkehren automatisch neu), GPS ungenau, keine Straße in der Nähe, Gebiet fehlt (Knopf zu den Gebieten).
+* **Akku:** Die Karte zeichnet nur bei Änderungen neu; im Hintergrund ist das GPS aus.
+* **Nicht enthalten (bewusst):** Vorab-Eingabe von Briefen, Kamera/Fotos, Scanner- oder Sendungsdaten, Kundennamen, Konten, Cloud, Tracking, Standortverlauf, Statistiken.
 
 ## Qualitätsbericht und Stichprobentest (Schritt 5)
 
 ```bash
 npm run report        # report.csv, schlechteste Straßen zuerst (+ Top 20 im Terminal)
 npm run sample-test   # zufällige Adressen je Gebiet über die App-Logik abfragen
-npm test              # Unit- und End-to-End-Tests (synthetisches OSM-Gebiet)
+npm test              # Unit- und End-to-End-Tests (synthetisches OSM-Gebiet, simulierte Fahrten)
+npm run test:browser  # Browsertests in Handygröße mit simuliertem GPS (Playwright/Chromium)
 ```
 
-**Praxistest Tespe/Marschacht (manuell):** Elbuferstraße, Neubaugebiet Schilfring und Nachbarstraßen (Schreibweise in `--details 21395,21436` prüfen). Prüfpunkte: Straßenseite, Entfernung, Reihenfolge der Nummern.
+Die Browsertests fahren im erfundenen Musterdorf: lange Straße, Kurve, Kreuzung, Abbiegen, Umkehr im Schritttempo, Stillstand mit springendem GPS, Haus in zweiter Reihe, fehlende Nummer, Straße über zwei PLZ-Gebiete, Vorbeifahren, Eingabesperre bei Fahrt. Der Workflow „Prüfen“ führt sie bei jedem Push auf einen Arbeitszweig aus, zusammen mit einem Bau aller Pakete aus echten OSM-Daten.
+
+### Im echten Einsatz testen
+
+Was sich ohne echtes iPhone, echtes GPS und echte Straßen nicht prüfen lässt:
+
+1. **Update angekommen:** App ganz schließen und neu öffnen. Menü zeigt „Offline bereit“, Einstellungen zeigen die Version.
+2. **Offline:** Flugmodus an, App öffnen. Karte, Vorschau, Nr. suchen und Haus-Infos müssen gehen (nur Sprechen nicht).
+3. **Bildschirm bleibt an:** Handy in der Halterung am Ladekabel 10 Minuten nicht berühren. Geht er aus: Automatische Sperre auf „Nie“ stellen und das melden.
+4. **Straßenerkennung:** Elbuferstraße in Tespe und in Marschacht abfahren. Stimmen Straße und Ort oben? An Kreuzungen (z. B. Avendorfer Weg) kein Hin- und Herspringen? Falsche Straße per Antippen korrigierbar?
+5. **Vorschauleiste:** An 5 Stellen die oben angezeigten Nummern links/rechts mit den Hausnummern an den Häusern vergleichen, auch im Schritttempo und nach dem Wenden.
+6. **Stillstand:** Beim Halten springt nichts (Karte, Seiten, Richtung).
+7. **GPS-Genauigkeit:** Wo erscheint „GPS ungenau“ (Bäume, enge Bebauung)? Wie weit liegen Position und Straße auseinander?
+8. **Ziel:** Drei Briefe hintereinander mit Nr. suchen, +2 und gegenüber. Stimmen Entfernung und Seite? Nach dem Vorbeifahren „Zurück … m“?
+9. **Zweite Reihe:** Bei den alten Höfen an der Elbuferstraße: Führung zur Einfahrt korrekt? Wo keine Einfahrt bekannt ist, mit „Hier → Hier ist die Einfahrt“ setzen und beim nächsten Mal prüfen.
+10. **Lücken schließen:** Eine fehlende Nummer mit „Hier ist Nr. …“ links/rechts setzen, Lage prüfen, „Rückgängig“ ausprobieren. Die Lückenanzeige unter „Meine Tour“ wird kleiner.
+11. **Meine Tour:** Teil A und B einrichten, „Heute zuerst“ umschalten, „danach …“ oben prüfen.
+12. **Sprache:** „fünfundneunzig“, „zwölf a“, „Elbuferstraße zweiundvierzig“ – mit und ohne Netz.
+13. **Lesbarkeit:** Aus 50–70 cm bei Sonne und in der Dämmerung, hell und dunkel. Schrift groß genug?
+14. **Eingabesperre:** Während der Fahrt gesperrt, im Stand sofort frei? Stört sie?
+15. **Sicherung:** „Haus-Infos sichern“ in „Dateien“ speichern. Steht unter „Eigene Daten“ „Speicher: dauerhaft“?
+16. **Akku:** Verbrauch über 2 Stunden am Ladekabel.
+17. **Standort verweigert:** In den iPhone-Einstellungen kurz ausschalten → Anleitung erscheint; wieder einschalten → läuft ohne Neustart weiter.
 
 ## Spätere Phase
 
-Den Kamera-Scan der Adresszeile erst bauen, wenn mit der Zustellbasis geklärt ist, ob er nach Datenschutz und Postgeheimnis erlaubt ist.
+Den Kamera-Scan der Adresszeile nicht bauen, solange nicht mit der Zustellbasis geklärt ist, ob er nach Datenschutz und Postgeheimnis erlaubt ist.
 
 Kartendaten © OpenStreetMap-Mitwirkende, ODbL.
