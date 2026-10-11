@@ -4,3 +4,4 @@ data/
 public/regions/
 report.csv
 *.osm.pbf
+undefined/

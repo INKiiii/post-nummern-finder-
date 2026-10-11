@@ -9,6 +9,7 @@ import { autoUpdateRegions, loadAll, state } from './data';
 import { toast } from './ui/dom';
 import { unlockAudio } from './approach';
 import { loadPhotos } from './photos';
+import { loadStats } from './stats';
 import { loadRecents } from './recents';
 import { loadHouseInfos } from './houseinfo';
 import { gps } from './gps';
@@ -23,7 +24,7 @@ async function boot() {
   const root = document.getElementById('app')!;
   initApp(root);
   try {
-    await Promise.all([loadAll(), loadRecents(), loadHouseInfos(), loadPhotos()]);
+    await Promise.all([loadAll(), loadRecents(), loadHouseInfos(), loadPhotos(), loadStats()]);
   } catch (e) {
     root.textContent = 'Speicher (IndexedDB) nicht verfügbar: ' + (e as Error).message;
     return;

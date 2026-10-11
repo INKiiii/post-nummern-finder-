@@ -4,11 +4,15 @@ import { h, toast } from './dom';
 import { keypad } from './keypad';
 import { show } from './app';
 import { state } from '../data';
-import { nearestStreets, preferNearby, searchStreets } from '../core';
+import { nearestStreets, normHouseNumber, normStreet, preferNearby, searchStreets } from '../core';
 import { gps } from '../gps';
 import { locationDeniedBox } from './location';
 import { backupState, backupUserData, BACKUP_DAYS } from '../exportimport';
 import { offlineStatus } from '../offline';
+import { icon } from './icons';
+import { lettersToday, lettersYesterday } from '../stats';
+import { loadHouseInfos } from '../houseinfo';
+import { loadPhotos } from '../photos';
 import { recentAddresses, recentStreets } from '../recents';
 import { listenForAddress, speechSupported } from '../voice';
 import type { Street } from '../types';
@@ -21,7 +25,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   const input = h('input', {
     class: 'search',
     type: 'search',
-    placeholder: 'Straße suchen …',
+    placeholder: 'Andere Straße suchen …',
     autocomplete: 'off',
     autocapitalize: 'words',
     spellcheck: 'false',
@@ -50,13 +54,37 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     nearKey = key;
     nearEl.replaceChildren(
       ...shown.map((c, i) =>
-        h(
-          'button',
-          { class: i === 0 ? 'btn near-main' : 'btn near-alt', onClick: () => choose(c.street) },
-          h('span', { class: 'near-name' }, `📍 ${c.street.name}`),
-          h('span', { class: 'near-meta' }, i === 0 ? `Hier · ${c.street.place || c.street.plz}` : 'oder'),
-        ),
+        i === 0
+          ? h(
+              'button',
+              { class: 'near-card', onClick: () => choose(c.street) },
+              h('span', { class: 'near-pin' }, icon('pin', 26)),
+              h(
+                'span',
+                { class: 'near-text' },
+                h('span', { class: 'near-kicker' }, 'DU BIST IN DER'),
+                h('span', { class: 'near-name' }, c.street.name),
+                h('span', { class: 'near-meta' }, `${c.street.place || c.street.plz} · Nummer eingeben`),
+              ),
+            )
+          : h('button', { class: 'near-alt', onClick: () => choose(c.street) }, `oder ${c.street.name}`),
       ),
+    );
+  };
+
+  const statsEl = h('div', { class: 'hello-stats' });
+  const renderStats = async () => {
+    // "Häuser gelernt": alle Adressen mit eigener Lage, Einfahrt, Haus-Info oder Foto
+    const learned = new Set<string>();
+    for (const k of (await loadHouseInfos()).keys()) learned.add(k.split('|').slice(1).join('|'));
+    for (const k of (await loadPhotos()).keys()) learned.add(k.split('|').slice(1).join('|'));
+    for (const p of state.points) learned.add(`${normStreet(p.streetName)}|${normHouseNumber(p.number)}`);
+    const today = lettersToday();
+    const prev = lettersYesterday();
+    const goal = Math.max(prev, 1);
+    statsEl.replaceChildren(
+      h('div', { class: 'bar' }, h('i', { style: { width: `${Math.min(100, Math.round((today / goal) * 100))}%` } })),
+      h('small', null, `${today} ${today === 1 ? 'Brief' : 'Briefe'} heute${prev ? ` · gestern ${prev}` : ''} · ${learned.size} ${learned.size === 1 ? 'Haus' : 'Häuser'} gelernt`),
     );
   };
 
@@ -66,12 +94,9 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     statusEl.replaceChildren(
       h(
         'span',
-        { class: ready ? 'badge-ok' : 'badge-warn' },
-        ready
-          ? `✓ Offline bereit · ${off.regions} ${off.regions === 1 ? 'Gebiet' : 'Gebiete'}`
-          : off.regions === 0
-            ? '⚠ Kein Gebiet geladen'
-            : '⚠ Noch nicht offline bereit',
+        { class: ready ? 'chip-ok' : 'chip-warn' },
+        icon(ready ? 'check' : 'warn', 16),
+        ready ? 'Offline bereit' : off.regions === 0 ? 'Kein Gebiet' : 'Nicht offline',
       ),
     );
     // Sicherungshinweis nur, wenn es eigene Daten gibt
@@ -217,23 +242,30 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   };
 
   const noData = !state.packages.length && !state.ustreets.length;
+  const greeting = () => {
+    return lettersToday() > 0 ? 'Moin! Tour läuft' : "Moin! Los geht's";
+  };
   root.append(
     ...[
     h(
       'header',
-      { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('regions') }, '🗺 Gebiete'),
-      h('div', { class: 'title' }, 'Hausnummer'),
-      h('button', { class: 'btn', onClick: () => show('data') }, '⇅ Daten'),
+      { class: 'hello' },
+      h(
+        'div',
+        { class: 'hello-row' },
+        h('b', { class: 'hello-title' }, greeting()),
+        h('button', { class: 'round-btn dark', onClick: () => show('regions'), 'aria-label': 'Gebiete' }, icon('map', 22)),
+        h('button', { class: 'round-btn dark', onClick: () => show('data'), 'aria-label': 'Eigene Daten' }, icon('data', 22)),
+      ),
+      h('div', { class: 'hello-row2' }, statusEl),
+      statsEl,
     ),
-    statusEl,
     noData
       ? h('button', { class: 'banner', onClick: () => show('regions') }, 'Noch kein Gebiet geladen – hier tippen, um ein Gebiet herunterzuladen.')
       : null,
     backupEl,
     nearEl,
-    speechSupported() ? h('button', { class: 'btn mic', onClick: voice }, '🎤 Sprechen') : null,
-    h('div', { class: 'search-wrap' }, input, chosen, suggestions),
+    h('div', { class: 'search-wrap' }, h('span', { class: 'search-ic' }, icon('search', 20)), input, chosen, suggestions),
     quick,
     numberDisplay,
     keypad({
@@ -244,6 +276,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
       },
       onEnter: go,
     }),
+    speechSupported() ? h('button', { class: 'pill-btn outline mic', onClick: voice }, icon('mic', 24), 'Sprechen') : null,
     ].filter((x): x is HTMLElement => !!x),
   );
   renderNumber();
@@ -251,6 +284,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   renderQuick();
   renderNear();
   void renderStatus();
+  void renderStats();
   const unsubGps = gps.subscribe(() => renderNear());
   if (params.listen && speechSupported()) setTimeout(voice, 150);
 
