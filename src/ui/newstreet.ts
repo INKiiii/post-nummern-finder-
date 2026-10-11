@@ -8,7 +8,7 @@ import { gps } from '../gps';
 import { state, saveUserStreet, uid } from '../data';
 import { distanceM } from '../core';
 
-export function newStreetScreen(root: HTMLElement, params: { name?: string }) {
+export function newStreetScreen(root: HTMLElement, params: { name?: string; from?: 'tour' }) {
   const line: [number, number][] = [];
   let recording = false;
   const name = h('input', { class: 'search', type: 'text', placeholder: 'Straßenname', value: params.name ?? '', autocapitalize: 'words' }) as HTMLInputElement;
@@ -95,14 +95,14 @@ export function newStreetScreen(root: HTMLElement, params: { name?: string }) {
       updated: Date.now(),
     });
     toast(`Straße „${n}“ angelegt. Hausnummern per langem Drücken auf der Karte setzen.`);
-    show('start', { streetId: 'u:' + id }, false);
+    show(params.from === 'tour' ? 'tour' : 'search', { streetId: 'u:' + id }, false);
   };
 
   root.append(
     h(
       'header',
       { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('start', {}, false) }, '‹ Zurück'),
+      h('button', { class: 'btn', onClick: () => show('live', {}, false) }, '‹ Zurück'),
       h('div', { class: 'title' }, 'Neue Straße'),
       h('button', { class: 'btn primary', onClick: save }, 'Speichern'),
     ),

@@ -1,14 +1,42 @@
 // Eigene Daten: Export/Import zum Teilen mit Kollegen, Liste eigener Punkte/Straßen, Quellen.
 
-import { h, toast, confirmBig, formatDate } from './dom';
+import { h, toast, confirmBig, formatBytes, formatDate } from './dom';
 import { show } from './app';
 import { state, deletePoint, deleteUserStreet } from '../data';
 import { backupState, backupUserData, importUserData } from '../exportimport';
 import { loadHouseInfos } from '../houseinfo';
+import { countOldPhotos, deleteOldPhotos } from '../photos';
+import { requestPersist, storageInfo } from '../status';
 
 export function dataScreen(root: HTMLElement) {
   const counts = h('p', { class: 'big-text' });
   const lists = h('div');
+
+  const oldPhotos = h('div');
+  const renderPhotos = async () => {
+    const n = await countOldPhotos();
+    oldPhotos.replaceChildren(
+      ...(n
+        ? [
+            h('p', { class: 'warn' }, `${n} ${n === 1 ? 'Foto' : 'Fotos'} aus einer älteren Version gespeichert. Die App speichert keine Fotos mehr.`),
+            h(
+              'button',
+              {
+                class: 'btn big danger',
+                onClick: async () => {
+                  if (await confirmBig(`${n} alte ${n === 1 ? 'Foto' : 'Fotos'} endgültig löschen?`, 'Löschen')) {
+                    await deleteOldPhotos();
+                    toast('Fotos gelöscht.');
+                    void renderPhotos();
+                  }
+                },
+              },
+              'Alte Fotos löschen',
+            ),
+          ]
+        : []),
+    );
+  };
 
   const render = async () => {
     const infos = await loadHouseInfos();
@@ -69,6 +97,19 @@ export function dataScreen(root: HTMLElement) {
     );
   };
 
+  const storageEl = h('p', { class: 'hint' });
+  const renderStorage = async () => {
+    await requestPersist();
+    const st = await storageInfo();
+    const used = st.usage !== null ? ` · belegt ${formatBytes(st.usage)}` : '';
+    storageEl.textContent =
+      st.persisted === true
+        ? `Speicher: dauerhaft (wird nicht automatisch gelöscht)${used}`
+        : st.persisted === false
+          ? `Speicher: nicht dauerhaft – das iPhone kann Daten löschen, wenn die App lange nicht genutzt wird. Regelmäßig sichern!${used}`
+          : `Speicher: Status unbekannt${used}`;
+    storageEl.classList.toggle('warn-text', st.persisted === false);
+  };
   const backupInfo = h('p', { class: 'hint' });
   const renderBackup = async () => {
     const b = await backupState();
@@ -89,7 +130,7 @@ export function dataScreen(root: HTMLElement) {
     try {
       const r = await importUserData(await f.text());
       toast(
-        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen, ${r.photos} Fotos${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
+        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
         5000,
       );
       void render();
@@ -103,7 +144,7 @@ export function dataScreen(root: HTMLElement) {
     h(
       'header',
       { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('start', {}, false) }, '‹ Zurück'),
+      h('button', { class: 'btn', onClick: () => show('live', {}, false) }, '‹ Zurück'),
       h('div', { class: 'title' }, 'Eigene Daten'),
     ),
     h(
@@ -116,12 +157,16 @@ export function dataScreen(root: HTMLElement) {
         h('button', { class: 'btn big', onClick: () => fileInput.click() }, '⇩ Importieren'),
       ),
       backupInfo,
+      storageEl,
+      oldPhotos,
       fileInput,
       lists,
     ),
   );
   void render();
   void renderBackup();
+  void renderPhotos();
+  void renderStorage();
 }
 
 function sourcesList() {

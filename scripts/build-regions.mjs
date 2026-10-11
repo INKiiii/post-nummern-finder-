@@ -9,7 +9,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { loadOsmPbf } from './lib/sources/osm-pbf.mjs';
 import { loadCsvAddresses } from './lib/sources/csv-addresses.mjs';
-import { mergeAddresses, attachBuildings, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
+import { mergeAddresses, attachBuildings, attachOutlines, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
 import { describeStreet, writeReport, loadAllPackages } from './lib/report.mjs';
 
 const HELP = `
@@ -31,6 +31,8 @@ Optionen:
   --only <liste>              nur diese Gebiete, z. B. 21395,21436
   --details [liste]           Vollständigkeit pro Straße ausgeben (alle oder nur diese Gebiete)
   --report <datei>            Qualitätsbericht (Standard: report.csv)
+  --outlines auto|off         Gebäudeumrisse für die Karte (Standard auto: nur wenn das Paket
+                              dadurch höchstens um --outlines-max wächst, Standard 2)
 `;
 
 // "--details" ohne Wert erlauben (parseArgs verlangt sonst einen Wert)
@@ -52,6 +54,8 @@ const { values } = parseArgs({
     only: { type: 'string' },
     details: { type: 'string' },
     report: { type: 'string', default: 'report.csv' },
+    outlines: { type: 'string', default: 'auto' },
+    'outlines-max': { type: 'string', default: '2' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -95,7 +99,7 @@ async function main() {
 
   // ---- Quellen laden ----
   const sources = [];
-  for (const f of inputs) sources.push(loadOsmPbf(f));
+  for (const f of inputs) sources.push(loadOsmPbf(f, { outlines: values.outlines !== 'off' }));
   for (const spec of values.official) {
     const i = spec.lastIndexOf(':');
     if (i < 0) throw new Error('--official erwartet <csv>:<config.json>');
@@ -126,6 +130,10 @@ async function main() {
   console.error(`Zufahrtswege Häusern zugeordnet: ${fmt(driveways)}`);
   const blds = attachBuildings(streets, sources.flatMap((s) => s.buildings ?? []));
   console.error(`Wohngebäude ohne Hausnummer Straßen zugeordnet: ${fmt(blds)}`);
+  if (values.outlines !== 'off') {
+    const n = attachOutlines(streets, sources.flatMap((s) => s.outlines ?? []));
+    console.error(`Gebäudeumrisse Straßen zugeordnet: ${fmt(n)}`);
+  }
   assignStreetIds(streets);
   const { regions, unassigned } = assignRegions(streets, areas, {
     group: values.group,
@@ -150,9 +158,15 @@ async function main() {
   console.log(`\n${'Gebiet'.padEnd(34)} ${'Straßen'.padStart(8)} ${'Nummern'.padStart(9)} ${'ohne Nr.'.padStart(9)}  Größe`);
   let totStreets = 0;
   let totNumbers = 0;
+  const outl = { with: 0, without: 0, kept: 0, dropped: 0 };
+  const maxRatio = Number(values['outlines-max']) || 2;
   for (const r of regions) {
     const pkg = makePackage(r, metas, built);
-    const w = writePackage(pkg, values.out);
+    const w = writePackage(pkg, values.out, maxRatio);
+    outl.with += w.size;
+    outl.without += w.sizeWithout;
+    if (w.hasOutlines) outl.kept++;
+    if (w.outlinesDropped) outl.dropped++;
     const numbers = pkg.streets.reduce((n, s) => n + s.h.length, 0);
     // Echte Lücken: Straßen mit Häusern, aber ohne Nummern (Feldwege ohne Häuser zählen nicht)
     const gaps = pkg.streets.filter((s) => s.q.gap && s.q.bu > 0).length;
@@ -189,6 +203,12 @@ async function main() {
   };
   fs.writeFileSync(indexFile, JSON.stringify(index, null, 1));
   console.log(`\n${regions.length} Gebiete, ${fmt(totStreets)} Straßen, ${fmt(totNumbers)} Hausnummern → ${values.out}`);
+  if (values.outlines !== 'off') {
+    console.log(
+      `Gebäudeumrisse: in ${outl.kept} Gebieten enthalten, in ${outl.dropped} weggelassen (Paket > ${maxRatio}x). ` +
+        `Größe gesamt ${kb(outl.without)} ohne → ${kb(outl.with)} mit Umrissen (Faktor ${(outl.with / Math.max(1, outl.without)).toFixed(2)}).`,
+    );
+  }
 
   // ---- Qualitätsbericht über alle gebauten Gebiete ----
   const rep = writeReport(loadAllPackages(values.out), values.report);

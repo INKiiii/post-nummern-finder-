@@ -62,3 +62,5 @@ export const projectOnLine = G.projectOnLine as (
   p: number[],
   line: number[][],
 ) => { s: number; dist: number; seg: number; t: number; point: number[]; tangent: number[]; cross: number } | null;
+export const pointAtS = G.pointAtS as (line: number[][], s: number) => { point: number[]; tangent: number[] };
+export const lineLength = G.lineLength as (line: number[][]) => number;

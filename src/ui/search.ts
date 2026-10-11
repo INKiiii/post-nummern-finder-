@@ -1,23 +1,22 @@
-// Startbildschirm: Straße wählen (Suche, zuletzt genutzt), Hausnummer tippen oder sprechen.
+// „Nr. suchen“ (im Stand): Straße ist vorausgewählt (aktuelle Live-Straße), Hausnummer
+// tippen oder sprechen. „Finden“ setzt das Ziel und kehrt zur Live-Karte zurück.
 
 import { h, toast } from './dom';
 import { keypad } from './keypad';
 import { show } from './app';
 import { state } from '../data';
-import { nearestStreets, normHouseNumber, normStreet, preferNearby, searchStreets } from '../core';
+import { nearestStreets, preferNearby, searchStreets } from '../core';
 import { gps } from '../gps';
 import { locationDeniedBox } from './location';
-import { backupState, backupUserData, BACKUP_DAYS } from '../exportimport';
-import { offlineStatus } from '../offline';
 import { icon } from './icons';
-import { lettersToday, lettersYesterday } from '../stats';
-import { loadHouseInfos } from '../houseinfo';
-import { loadPhotos } from '../photos';
-import { recentAddresses, recentStreets } from '../recents';
+import { recentAddresses, recentStreets, remember } from '../recents';
+import { getTarget, setTarget } from '../session';
+import { quickSteps } from '../preview';
+import { countUse } from '../tour';
 import { listenForAddress, speechSupported } from '../voice';
 import type { Street } from '../types';
 
-export function startScreen(root: HTMLElement, params: { streetId?: string; listen?: boolean }) {
+export function searchScreen(root: HTMLElement, params: { streetId?: string; listen?: boolean }) {
   let street: Street | null = params.streetId ? state.index.streets.get(params.streetId) ?? null : null;
   let number = '';
 
@@ -35,8 +34,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   const chosen = h('div', { class: 'chosen' });
   const quick = h('div', { class: 'quick' });
   const nearEl = h('div', { class: 'near' });
-  const statusEl = h('div', { class: 'status-row' });
-  const backupEl = h('div');
+  const stepsEl = h('div', { class: 'steps' });
 
   // Nächstgelegene Straße als großer Knopf (nur Nummer noch eingeben)
   let nearKey = '';
@@ -72,53 +70,13 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     );
   };
 
-  const statsEl = h('div', { class: 'hello-stats' });
-  const renderStats = async () => {
-    // "Häuser gelernt": alle Adressen mit eigener Lage, Einfahrt, Haus-Info oder Foto
-    const learned = new Set<string>();
-    for (const k of (await loadHouseInfos()).keys()) learned.add(k.split('|').slice(1).join('|'));
-    for (const k of (await loadPhotos()).keys()) learned.add(k.split('|').slice(1).join('|'));
-    for (const p of state.points) learned.add(`${normStreet(p.streetName)}|${normHouseNumber(p.number)}`);
-    const today = lettersToday();
-    const prev = lettersYesterday();
-    const goal = Math.max(prev, 1);
-    statsEl.replaceChildren(
-      h('div', { class: 'bar' }, h('i', { style: { width: `${Math.min(100, Math.round((today / goal) * 100))}%` } })),
-      h('small', null, `${today} ${today === 1 ? 'Brief' : 'Briefe'} heute${prev ? ` · gestern ${prev}` : ''} · ${learned.size} ${learned.size === 1 ? 'Haus' : 'Häuser'} gelernt`),
-    );
-  };
-
-  const renderStatus = async () => {
-    const [off, b] = await Promise.all([offlineStatus(), backupState()]);
-    const ready = off.app && off.regions > 0;
-    statusEl.replaceChildren(
-      h(
-        'span',
-        { class: ready ? 'chip-ok' : 'chip-warn' },
-        icon(ready ? 'check' : 'warn', 16),
-        ready ? 'Offline bereit' : off.regions === 0 ? 'Kein Gebiet' : 'Nicht offline',
-      ),
-    );
-    // Sicherungshinweis nur, wenn es eigene Daten gibt
-    if (b.count > 0 && b.due) {
-      backupEl.replaceChildren(
-        h(
-          'button',
-          {
-            class: 'banner',
-            onClick: async () => {
-              if (await backupUserData()) {
-                toast('Haus-Infos gesichert.');
-                void renderStatus();
-              }
-            },
-          },
-          b.last
-            ? `💾 Letzte Sicherung vor über ${BACKUP_DAYS} Tagen – jetzt Haus-Infos sichern`
-            : '💾 Haus-Infos noch nie gesichert – jetzt sichern',
-        ),
-      );
-    } else backupEl.replaceChildren();
+  // Ziel setzen und zurück zur Live-Karte (Straße bleibt für den nächsten Brief gesetzt)
+  const finish = (s: Street, nr: string) => {
+    if (nr) void remember({ streetId: s.id, streetName: s.name, place: s.place, number: nr });
+    // Nur der Straßenname wird gezählt (Vorschlag „zur Tour hinzufügen“)
+    void countUse(s);
+    setTarget({ streetId: s.id, number: nr });
+    show('live', {}, false);
   };
 
   const go = () => {
@@ -127,7 +85,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
       input.focus();
       return;
     }
-    show('result', { streetId: street.id, number });
+    finish(street, number);
   };
 
   const renderNumber = () => {
@@ -143,7 +101,32 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     renderNear();
   };
 
+  // Schnelltasten für den nächsten Brief: −2, +2, gegenüber (zur letzten Nummer dieser Straße)
+  const renderSteps = () => {
+    const t = getTarget();
+    if (!street || !t || t.streetId !== street.id || !t.number) {
+      stepsEl.replaceChildren();
+      quick.hidden = false;
+      return;
+    }
+    const st = quickSteps(street, t.number);
+    const s0 = street;
+    const btn = (label: string, value: string | null) =>
+      value
+        ? h('button', { class: 'step-btn', onClick: () => finish(s0, value) }, h('span', { class: 'step-cap' }, label), h('b', null, value))
+        : h('span', { class: 'step-btn empty' });
+    // Die Schnelltasten ersetzen die Zeile „Zuletzt“ (Platz für große Tasten)
+    quick.hidden = true;
+    stepsEl.replaceChildren(
+      h('span', { class: 'steps-label' }, `Nach Nr. ${t.number}:`),
+      btn('−2', st.minus2),
+      btn('+2', st.plus2),
+      btn('gegenüber', st.opposite),
+    );
+  };
+
   const renderChosen = () => {
+    renderSteps();
     if (!street) {
       chosen.replaceChildren();
       chosen.hidden = true;
@@ -214,7 +197,17 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     quick.replaceChildren(
       ...(rec.length ? [h('span', { class: 'quick-label' }, 'Zuletzt:')] : []),
       ...rec.map((r) =>
-        h('button', { class: 'chip', onClick: () => show('result', { streetId: r.streetId, number: r.number }) }, `${r.streetName} ${r.number}`),
+        h(
+          'button',
+          {
+            class: 'chip',
+            onClick: () => {
+              const s = state.index.streets.get(r.streetId);
+              if (s) finish(s, r.number);
+            },
+          },
+          `${r.streetName} ${r.number}`,
+        ),
       ),
     );
   };
@@ -225,10 +218,10 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
     );
     if (!r) return;
     if (r.street && r.number) {
-      show('result', { streetId: r.street.id, number: r.number });
+      finish(r.street, r.number);
     } else if (!r.street && r.number && street) {
       // Nur Nummer gesagt: gewählte Straße (vorsortierte Briefe)
-      show('result', { streetId: street.id, number: r.number });
+      finish(street, r.number);
     } else if (!r.street && r.number) {
       number = r.number;
       renderNumber();
@@ -242,31 +235,21 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   };
 
   const noData = !state.packages.length && !state.ustreets.length;
-  const greeting = () => {
-    return lettersToday() > 0 ? 'Moin! Tour läuft' : "Moin! Los geht's";
-  };
   root.append(
     ...[
     h(
       'header',
-      { class: 'hello' },
-      h(
-        'div',
-        { class: 'hello-row' },
-        h('b', { class: 'hello-title' }, greeting()),
-        h('button', { class: 'round-btn dark', onClick: () => show('regions'), 'aria-label': 'Gebiete' }, icon('map', 22)),
-        h('button', { class: 'round-btn dark', onClick: () => show('data'), 'aria-label': 'Eigene Daten' }, icon('data', 22)),
-      ),
-      h('div', { class: 'hello-row2' }, statusEl),
-      statsEl,
+      { class: 'head' },
+      h('button', { class: 'round-btn', onClick: () => show('live', {}, false), 'aria-label': 'Zurück zur Karte' }, icon('back', 26)),
+      h('div', { class: 'head-title' }, h('div', { class: 'addr' }, 'Nr. suchen')),
     ),
     noData
       ? h('button', { class: 'banner', onClick: () => show('regions') }, 'Noch kein Gebiet geladen – hier tippen, um ein Gebiet herunterzuladen.')
       : null,
-    backupEl,
     nearEl,
     h('div', { class: 'search-wrap' }, h('span', { class: 'search-ic' }, icon('search', 20)), input, chosen, suggestions),
     quick,
+    stepsEl,
     numberDisplay,
     keypad({
       value: number,
@@ -283,8 +266,6 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
   renderChosen();
   renderQuick();
   renderNear();
-  void renderStatus();
-  void renderStats();
   const unsubGps = gps.subscribe(() => renderNear());
   if (params.listen && speechSupported()) setTimeout(voice, 150);
 

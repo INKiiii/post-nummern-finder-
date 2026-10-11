@@ -5,17 +5,23 @@ import { parseSpokenAddress } from './speechparse';
 import { editDistance, normStreet, preferNearby, searchStreets } from './core';
 import { gps } from './gps';
 import { state } from './data';
+import { tourStreetIds } from './tour';
 import { h, overlay, toast } from './ui/dom';
 import type { Street } from './types';
 
 export { speechSupported };
 
-/** Findet die Straße zu einem gesprochenen Namen; null wenn zu unsicher. */
+/**
+ * Findet die Straße zu einem gesprochenen Namen; null wenn zu unsicher.
+ * Ist eine Tour eingerichtet, kommen nur Tour-Straßen in Frage (weniger Verwechslungen).
+ */
 export function matchSpokenStreet(spoken: string): Street | null {
   const q = normStreet(spoken);
   if (q.length < 3) return null;
+  const tourIds = tourStreetIds(state.index);
   // Gleichnamige Straßen: die dem Standort nächste zuerst
-  const cands = preferNearby(searchStreets(state.index, spoken, 8), gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
+  const found = searchStreets(state.index, spoken, tourIds.size ? 40 : 8).filter((s) => !tourIds.size || tourIds.has(s.id));
+  const cands = preferNearby(found, gps.fix ? [gps.fix.lat, gps.fix.lon] : null);
   for (const s of cands) {
     if (s.norm === q || s.norm.startsWith(q) || q.startsWith(s.norm)) return s;
     const d = editDistance(q, s.norm, 4);

@@ -22,21 +22,40 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props | 
   return e;
 }
 
-/** Kurze Meldung oben am Bildschirm (verdeckt nie Tastatur oder Karte), nach 2 s weg. */
-export function toast(msg: string, ms = 2000) {
+/**
+ * Kurze Meldung oben am Bildschirm (verdeckt nie Tastatur, Leiste oder die Karte unten),
+ * nach 2 s weg. Mit Aktion (z. B. „Rückgängig“) bleibt sie 6 s stehen.
+ */
+export function toast(msg: string, ms = 2000, action?: { label: string; run: () => void }) {
   document.querySelectorAll('.toast').forEach((o) => o.remove());
-  const t = h('div', { class: 'toast', role: 'status' }, msg);
+  const t = h('div', { class: 'toast', role: 'status' }, h('span', null, msg));
+  if (action) {
+    ms = Math.max(ms, 6000);
+    t.append(
+      h(
+        'button',
+        {
+          class: 'toast-action',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation();
+            t.remove();
+            action.run();
+          },
+        },
+        action.label,
+      ),
+    );
+  }
   t.addEventListener('click', () => t.remove());
   document.body.appendChild(t);
-  setTimeout(() => t.classList.add('show'), 10);
-  setTimeout(() => {
-    t.classList.remove('show');
-    setTimeout(() => t.remove(), 300);
-  }, ms);
+  t.classList.add('show');
+  setTimeout(() => t.remove(), ms);
 }
 
 /** Vollbild-Dialog; liefert eine Schließen-Funktion. */
 export function overlay(content: HTMLElement, onClose?: () => void) {
+  // Meldungen oben würden den Kopf des Dialogs verdecken
+  document.querySelectorAll('.toast').forEach((t) => t.remove());
   const o = h('div', { class: 'overlay' }, content);
   document.body.appendChild(o);
   const close = () => {

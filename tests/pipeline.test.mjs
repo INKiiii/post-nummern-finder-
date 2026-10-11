@@ -6,8 +6,8 @@ import path from 'node:path';
 import { writePbf } from '../scripts/lib/pbf-writer.mjs';
 import { makeSyntheticTown } from '../scripts/lib/synthetic.mjs';
 import { loadOsmPbf } from '../scripts/lib/sources/osm-pbf.mjs';
-import { mergeAddresses, attachBuildings, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
-import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets, preferNearby } from '../src/shared/lookup.js';
+import { mergeAddresses, attachBuildings, attachOutlines, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
+import { decodeOutlines, encodeOutlines, buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet, nearestStreets, preferNearby } from '../src/shared/lookup.js';
 import { distanceM } from '../src/shared/geo.js';
 
 let pkgs;
@@ -21,6 +21,7 @@ function build(opts = {}) {
   const streets = buildStreets(src.streetSegments, addresses);
   attachDriveways(streets, src.drivewaySegments);
   attachBuildings(streets, src.buildings);
+  attachOutlines(streets, src.outlines);
   assignStreetIds(streets);
   const { regions } = assignRegions(streets, src.areas, { group: 'plz', ...opts });
   return regions.map((r) => makePackage(r, [src.meta, ...src.extraSources], 'test'));
@@ -286,3 +287,20 @@ describe('Suche und Lage (App-Logik)', () => {
   });
 });
 
+describe('Gebäudeumrisse', () => {
+  it('kodiert und dekodiert Umrisse verlustfrei (1e-5 Grad)', () => {
+    const polys = [Int32Array.from([5330000, 1020000, 5330010, 1020000, 5330010, 1020015]), Int32Array.from([5329000, 1019000, 5329005, 1019000, 5329005, 1019007, 5329000, 1019007])];
+    const dec = decodeOutlines(JSON.parse(JSON.stringify(encodeOutlines(polys))));
+    const flat = dec.map((p) => p.flatMap(([a, b]) => [Math.round(a * 1e5), Math.round(b * 1e5)]));
+    expect(flat).toContainEqual([...polys[0]]);
+    expect(flat).toContainEqual([...polys[1]]);
+  });
+
+  it('hängt Umrisse an die nächste Straße und vereinfacht Quadrate auf 4 Ecken', () => {
+    const e = pkgs[0].streets.find((s) => s.n === 'Elbuferstraße');
+    expect(e.o?.length).toBeGreaterThan(20);
+    const idx = buildIndex(pkgs);
+    const st = [...idx.streets.values()].find((s) => s.name === 'Elbuferstraße' && s.outlines.length);
+    expect(st.outlines.every((o) => o.length === 4)).toBe(true);
+  });
+});

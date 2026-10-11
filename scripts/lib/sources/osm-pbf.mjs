@@ -105,7 +105,7 @@ export function loadOsmPbf(file, opts = {}) {
     if (kinds & 2) {
       eachWay(block, (id, tags, getRefs) => {
         const a = addrOf(tags);
-        if (a) addrWays.push({ id, addr: a, refs: getRefs() });
+        if (a) addrWays.push({ id, addr: a, refs: getRefs(), building: !!tags.building });
         else if (tags.building && RESIDENTIAL.has(tags.building) && !tags['addr:housenumber']) {
           plainBuildings.push(getRefs());
         }
@@ -253,6 +253,16 @@ export function loadOsmPbf(file, opts = {}) {
 
   // Wohngebäude ohne Hausnummer (Mittelpunkt, ab 30 m² Grundfläche)
   const buildings = [];
+  // Gebäudeumrisse (vereinfacht, ~1 m genau) für die Karte: Gebäude mit Adresse + Wohngebäude
+  const outlines = [];
+  const withOutlines = opts.outlines !== false;
+  if (withOutlines) {
+    for (const w of addrWays) {
+      if (!w.building || w.refs.length < 4 || w.refs[0] !== w.refs[w.refs.length - 1]) continue;
+      const o = outlineOf(resolve(w.refs).pts);
+      if (o) outlines.push(o);
+    }
+  }
   for (const refs of plainBuildings) {
     if (refs.length < 4 || refs[0] !== refs[refs.length - 1]) continue;
     const { pts } = resolve(refs);
@@ -264,7 +274,12 @@ export function loadOsmPbf(file, opts = {}) {
     if (Math.abs(area / 2) < 30) continue;
     const [x, y] = polygonCentroid(ring);
     buildings.push(proj.toLatLon(x, y));
+    if (withOutlines) {
+      const o = outlineOf(pts);
+      if (o) outlines.push(o);
+    }
   }
+  if (withOutlines) log(`Gebäudeumrisse: ${outlines.length}`);
   log(`Interpolationslinien: ${interpCount} Nummern erzeugt; ${buildings.length} Wohngebäude ohne Hausnummer`);
 
   const drivewaySegments = [];
@@ -304,10 +319,47 @@ export function loadOsmPbf(file, opts = {}) {
       },
     ],
     buildings,
+    outlines,
     streetSegments,
     drivewaySegments,
     areas,
   };
+}
+
+/**
+ * Vereinfachter Gebäudeumriss als Int32Array [lat, lon, ...] in 1e-5 Grad (offener Ring).
+ * Punkte, die weniger als 0,6 m von der Verbindung ihrer Nachbarn abweichen, entfallen.
+ */
+export function outlineOf(pts) {
+  if (pts.length < 4) return null;
+  const proj = makeProjection(pts[0][0], pts[0][1]);
+  let ring = pts.slice(0, -1).map(([la, lo]) => proj.toXY(la, lo));
+  for (let changed = true; changed && ring.length > 3; ) {
+    changed = false;
+    for (let i = 0; i < ring.length && ring.length > 3; i++) {
+      const a = ring[(i - 1 + ring.length) % ring.length];
+      const b = ring[i];
+      const c = ring[(i + 1) % ring.length];
+      const dx = c[0] - a[0];
+      const dy = c[1] - a[1];
+      const len = Math.hypot(dx, dy);
+      const d = len > 1e-9 ? Math.abs(dy * (b[0] - a[0]) - dx * (b[1] - a[1])) / len : Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (d < 0.6) {
+        ring.splice(i, 1);
+        i--;
+        changed = true;
+      }
+    }
+  }
+  const out = [];
+  for (const [x, y] of ring) {
+    const [la, lo] = proj.toLatLon(x, y);
+    const qa = Math.round(la * 1e5);
+    const qo = Math.round(lo * 1e5);
+    if (out.length && out[out.length - 2] === qa && out[out.length - 1] === qo) continue;
+    out.push(qa, qo);
+  }
+  return out.length >= 6 ? Int32Array.from(out) : null;
 }
 
 // Gebäudearten, die als Wohn- bzw. Zustellgebäude zählen (keine Garagen, Schuppen usw.)
