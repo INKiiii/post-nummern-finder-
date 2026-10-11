@@ -399,6 +399,112 @@ export class MapView {
       });
   }
 
+  /**
+   * Schreibt den Straßennamen entlang eines möglichst geraden, sichtbaren Stücks der Straße.
+   * Prüft Kollisionen über Stichproben entlang der Schrift. Gibt true zurück, wenn platziert.
+   */
+  private placeStreetLabel(
+    st: Street,
+    isFocus: boolean,
+    toS: (lat: number, lon: number) => [number, number],
+    w: number,
+    h: number,
+    free: (x0: number, y0: number, x1: number, y1: number) => boolean,
+    reserve: (x0: number, y0: number, x1: number, y1: number) => void,
+    parent: Element,
+    size = 16,
+  ): boolean {
+    const tw = st.name.length * size * 0.58 + 6;
+    const m = 8;
+    const inside = (p: number[]) => p[0] > m && p[0] < w - m && p[1] > m && p[1] < h - m;
+    type Cand = { cx: number; cy: number; ang: number; samples: number[][]; dist: number };
+    const cands: Cand[] = [];
+    for (const line of st.lines) {
+      if (line.length < 2) continue;
+      const sp = line.map(([la, lo]) => toS(la, lo));
+      const cum = [0];
+      for (let i = 1; i < sp.length; i++) cum.push(cum[i - 1] + Math.hypot(sp[i][0] - sp[i - 1][0], sp[i][1] - sp[i - 1][1]));
+      const total = cum[cum.length - 1];
+      if (total < tw + 4) continue;
+      const at = (d: number) => {
+        let i = 1;
+        while (i < cum.length - 1 && cum[i] < d) i++;
+        const t = Math.max(0, Math.min(1, (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1)));
+        return [sp[i - 1][0] + (sp[i][0] - sp[i - 1][0]) * t, sp[i - 1][1] + (sp[i][1] - sp[i - 1][1]) * t];
+      };
+      // Nur auf sichtbaren Abschnitten suchen (die ganze Straße kann sehr lang sein)
+      const ds: number[] = [];
+      const pad = tw;
+      for (let i = 1; i < sp.length && ds.length < 400; i++) {
+        const [x0, y0] = sp[i - 1];
+        const [x1, y1] = sp[i];
+        // Liang-Barsky: sichtbaren Teil [t0, t1] des Abschnitts bestimmen
+        let t0 = 0;
+        let t1 = 1;
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const clip = (p: number, q: number) => {
+          if (p === 0) return q >= 0;
+          const r = q / p;
+          if (p < 0) {
+            if (r > t1) return false;
+            if (r > t0) t0 = r;
+          } else {
+            if (r < t0) return false;
+            if (r < t1) t1 = r;
+          }
+          return true;
+        };
+        if (!(clip(-dx, x0 + pad) && clip(dx, w + pad - x0) && clip(-dy, y0 + pad) && clip(dy, h + pad - y0))) continue;
+        const segLen = cum[i] - cum[i - 1];
+        for (let d = cum[i - 1] + t0 * segLen; d <= cum[i - 1] + t1 * segLen && ds.length < 400; d += 12) ds.push(d);
+      }
+      for (const d of ds) {
+        if (d < tw / 2 || d > total - tw / 2) continue;
+        const A = at(d - tw / 2);
+        const B = at(d + tw / 2);
+        const P = at(d);
+        if (!inside(A) || !inside(B)) continue;
+        // Nur gerade Stücke: Mitte darf kaum von der Verbindung A–B abweichen
+        const ab = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+        const off = Math.abs((B[0] - A[0]) * (A[1] - P[1]) - (A[0] - P[0]) * (B[1] - A[1])) / ab;
+        if (off > 5 || ab < tw * 0.9) continue;
+        let ang = (Math.atan2(B[1] - A[1], B[0] - A[0]) * 180) / Math.PI;
+        if (ang > 90) ang -= 180;
+        if (ang < -90) ang += 180;
+        const cx = (A[0] + B[0]) / 2;
+        const cy = (A[1] + B[1]) / 2;
+        const samples: number[][] = [];
+        const n = Math.max(2, Math.ceil(tw / 9));
+        for (let k = 0; k <= n; k++) {
+          const f = k / n;
+          samples.push([A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f]);
+        }
+        cands.push({ cx, cy, ang, samples, dist: Math.hypot(cx - w / 2, cy - h / 2) });
+      }
+    }
+    cands.sort((a, b) => a.dist - b.dist);
+    for (const c of cands.slice(0, 80)) {
+      const half = size * 0.55;
+      if (!c.samples.every(([x, y]) => free(x - 5, y - half, x + 5, y + half))) continue;
+      for (const [x, y] of c.samples) reserve(x - 5, y - half, x + 5, y + half);
+      const t = el(
+        'text',
+        {
+          x: c.cx,
+          y: c.cy + size * 0.35,
+          transform: `rotate(${c.ang.toFixed(1)} ${c.cx.toFixed(1)} ${c.cy.toFixed(1)})`,
+          class: isFocus ? 'st-label st-label-focus' : 'st-label',
+          style: `font-size:${size}px`,
+        },
+        parent,
+      );
+      t.textContent = st.name;
+      return true;
+    }
+    return false;
+  }
+
   private render() {
     const { w, h } = this.size();
     const svg = this.svg;
@@ -466,16 +572,19 @@ export class MapView {
         .join('');
 
     const streetLabels: Street[] = [];
+    const others: Street[] = [];
     if (index) {
       for (const s of index.streets.values()) {
         if (s === focus || !s.bbox) continue;
         const [y0, x0, y1, x1] = s.bbox;
         if (y1 < south || y0 > north || x1 < west || x0 > east) continue;
         for (const line of s.lines) el('path', { d: pathOf(line), class: 'st', 'stroke-width': streetW }, gStreets);
+        others.push(s);
         // Straßennamen erst nach den Hausnummern platzieren (Hausnummern haben Vorrang)
-        if (S > 0.6 && s.lines.length) streetLabels.push(s);
+        if (s.lines.length) streetLabels.push(s);
       }
     }
+    if (focus?.lines.length) streetLabels.unshift(focus);
     if (focus) {
       for (const line of focus.lines) el('path', { d: pathOf(line), class: 'st-focus', 'stroke-width': streetW + 4 }, gStreets);
       if (!focus.lines.length && focus.start) {
@@ -535,47 +644,56 @@ export class MapView {
         if (visible(x, y)) reserve(x - 6, y - 6, x + 6, y + 6);
       }
     }
-    // Straßennamen: weichen entlang der Straße aus (Mitte, dann weiter außen, über/unter der
-    // Linie) oder werden ausgeblendet. Nie über Hausnummern, Ziel, Einfahrt oder Auto.
+    // Hausnummern der anderen Straßen: Punkte; Zahlen im Umkreis von 40 m um das Auto
+    // (ohne GPS: wenn weit hineingezoomt). Ohne Überlappung.
+    {
+      const gDots = el('g', {}, svg);
+      const gNum = el('g', {}, svg);
+      const showAll = !user && S >= 2.5;
+      let dots = 0;
+      for (const st of others) {
+        for (const n of st.numbers) {
+          if (dots > 800) break;
+          const [x, y] = toS(n.lat, n.lon);
+          if (!visible(x, y)) continue;
+          dots++;
+          el('circle', { cx: x, cy: y, r: 3.5, class: n.user ? 'hn hn-user' : 'hn hn-other' }, gDots);
+          const nearCar = user && distanceM(user.lat, user.lon, n.lat, n.lon) <= LABEL_NEAR_CAR;
+          if (!nearCar && !showAll) continue;
+          const tw = n.label.length * 17 * 0.6;
+          const spots = [
+            { tx: x + 6, anchor: 'start', box: [x + 4, y - 11, x + 8 + tw, y + 8] },
+            { tx: x - 6, anchor: 'end', box: [x - 8 - tw, y - 11, x - 4, y + 8] },
+          ];
+          const spot = spots.find((p) => free(p.box[0], p.box[1], p.box[2], p.box[3]));
+          if (!spot) continue;
+          reserve(spot.box[0], spot.box[1], spot.box[2], spot.box[3]);
+          const t = el('text', { x: spot.tx, y: y + 6, 'text-anchor': spot.anchor, class: 'hn-label hn-label-other' }, gNum);
+          t.textContent = n.label;
+        }
+      }
+      for (const st of others)
+        for (const n of st.numbers) {
+          const [x, y] = toS(n.lat, n.lon);
+          if (visible(x, y)) reserve(x - 5, y - 5, x + 5, y + 5);
+        }
+    }
+    // Straßennamen: entlang der Straße geschrieben (wie in Karten-Apps), auf der Linie,
+    // weichen entlang der Straße aus oder werden ausgeblendet. Nie über Hausnummern,
+    // Ziel, Einfahrt oder Auto.
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);
       reserve(x - 13, y - 36, x + 13, y + 13);
     }
     let labelCount = 0;
     for (const st of streetLabels) {
-      if (labelCount >= 40) break;
-      const longest = st.lines.reduce((a, l) => (l.length > a.length ? l : a));
-      const sp = longest.map(([la, lo]) => toS(la, lo));
-      const cum = [0];
-      for (let i = 1; i < sp.length; i++) cum.push(cum[i - 1] + Math.hypot(sp[i][0] - sp[i - 1][0], sp[i][1] - sp[i - 1][1]));
-      // Kandidaten nur auf dem sichtbaren Teil der Straße, von dessen Mitte nach außen
-      const total = cum[cum.length - 1];
-      const step = Math.max(20, total / 300);
-      const cands: [number, number][] = [];
-      for (let d = 0, i = 1; d <= total && sp.length > 1; d += step) {
-        while (i < cum.length - 1 && cum[i] < d) i++;
-        const t = Math.max(0, Math.min(1, (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1)));
-        const x = sp[i - 1][0] + (sp[i][0] - sp[i - 1][0]) * t;
-        const y = sp[i - 1][1] + (sp[i][1] - sp[i - 1][1]) * t;
-        if (x > 40 && x < w - 40 && y > 20 && y < h - 20) cands.push([x, y]);
-      }
-      const mid = Math.floor(cands.length / 2);
-      const order = cands.map((_, k) => k).sort((p1, p2) => Math.abs(p1 - mid) - Math.abs(p2 - mid));
-      let placedLabel = false;
-      for (const k of order.slice(0, 24)) {
-        const [x, y] = cands[k];
-        for (const ty of [y - streetW, y + streetW + 15]) {
-          const box = textBox(x, ty, st.name, 15, 'middle');
-          if (box[0] < 0 || box[2] > w || !free(...box)) continue;
-          reserve(...box);
-          const t = el('text', { x, y: ty, class: 'st-label' }, gLabels);
-          t.textContent = st.name;
-          labelCount++;
-          placedLabel = true;
-          break;
-        }
-        if (placedLabel) break;
-      }
+      if (labelCount >= 60) break;
+      // Erst normale Größe, bei Platzmangel etwas kleiner
+      if (
+        this.placeStreetLabel(st, st === focus, toS, w, h, free, reserve, gLabels, 16) ||
+        this.placeStreetLabel(st, st === focus, toS, w, h, free, reserve, gLabels, 13)
+      )
+        labelCount++;
     }
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);

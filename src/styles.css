@@ -278,10 +278,9 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
   border: 3px solid #fff; border-top: 0; height: 18px; line-height: 14px;
 }
 .map-attr { font-size: 11px; color: #888; white-space: nowrap; }
-.st { fill: none; stroke: #5a5a5a; stroke-linecap: round; stroke-linejoin: round; }
+.st { fill: none; stroke: #767676; stroke-linecap: round; stroke-linejoin: round; }
 .st-focus { fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round; }
 .st-start { fill: #fff; }
-.st-label { fill: #bbb; font-size: 15px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 5px; stroke-linejoin: round; }
 .hn { fill: #9a9a9a; stroke: #000; stroke-width: 1.5; }
 .hn-label { fill: #fff; font-size: 18px; font-weight: 800; paint-order: stroke; stroke: #000; stroke-width: 6px; stroke-linejoin: round; }
 .hn-strong { font-size: 20px; font-weight: 900; }
@@ -395,3 +394,26 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
 .screen-start .banner { margin-top: 8px; }
 .loc-retry { margin-top: 10px; border-color: #fff; }
 .bld { fill: none; stroke: #8a8a8a; stroke-width: 2; }
+/* Straßennamen entlang der Straße, gut lesbar auf der Linie */
+.st-label { fill: #f2f2f2; font-size: 16px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: #000; stroke-width: 4px; stroke-linejoin: round; }
+.st-label-focus { fill: var(--accent); }
+.hn-other { fill: #8a8a8a; }
+.hn-label-other { font-size: 17px; fill: #d8d8d8; }
+
+/* Ergebnis kompakt, damit die Karte möglichst viel Platz bekommt */
+.screen-result .guidance { padding: 4px 12px 4px; }
+.screen-result .dist { font-size: 48px; }
+.screen-result .side { font-size: 34px; }
+.screen-result .note { font-size: 16px; line-height: 1.25; }
+.screen-result .gps-status { font-size: 14px; }
+.screen-result .drive-guide { font-size: 20px; }
+.screen-result .info-card { margin: 6px 10px 4px; padding: 6px 40px 6px 12px; font-size: 19px; }
+.screen-result .info-card .info-head { font-size: 22px; }
+.screen-result .info-card.empty { min-height: 44px; padding: 6px 12px; }
+.screen-result .info-empty { font-size: 17px; }
+.screen-result .bottombar { padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+.screen-result .btn.huge { min-height: 64px; font-size: 26px; }
+.screen-result .map { min-height: 42vh; }
+.screen-result .map-bar { padding: 4px 8px; }
+.screen-result .map-bar button { height: 44px; min-width: 50px; font-size: 24px; }
+.screen-result .map-bar button.mode { font-size: 17px; }

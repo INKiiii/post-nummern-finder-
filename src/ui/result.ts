@@ -78,7 +78,6 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       ...[
         res.estimated && res.status !== 'none' ? h('span', { class: 'badge-est' }, 'geschätzt') : null,
         txt ? h('span', null, ' ' + txt) : null,
-        res.estimated && number ? h('span', { class: 'muted' }, ' · lang auf Karte drücken zum Setzen') : null,
       ].filter((x): x is HTMLSpanElement => !!x),
     );
     noteEl.hidden = !txt && !res.estimated;
@@ -105,7 +104,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       infoCard.append(h('div', { class: 'info-head' }, first), ...rest.map((l) => h('div', { class: 'info-line' }, l)), h('div', { class: 'info-edit' }, '✎'));
       infoCard.classList.remove('empty');
     } else {
-      infoCard.append(h('div', { class: 'info-empty' }, '+ Haus-Info: Eingänge & Briefkästen'));
+      infoCard.append(h('div', { class: 'info-empty' }, '+ Haus-Info (Eingänge, Briefkästen)'));
       infoCard.classList.add('empty');
     }
   };
