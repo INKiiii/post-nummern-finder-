@@ -16,6 +16,12 @@ export const findHouse = L.findHouse as unknown as (street: Street, input: strin
 export const sortedNumbers = L.sortedNumbers as unknown as (street: Street) => Street['numbers'];
 export const streetMidpoint = L.streetMidpoint as unknown as (street: Street) => [number, number] | null;
 export const PACKAGE_FORMAT: string = L.PACKAGE_FORMAT;
+export const drivewayFor = L.drivewayFor as unknown as (
+  street: Street,
+  input: string,
+  result?: FindResult,
+) => { line: [number, number][]; junction: [number, number]; user: boolean; pointId?: string } | null;
+export const distanceToStreet = L.distanceToStreet as unknown as (street: Street, lat: number, lon: number) => number | null;
 
 export const normStreet: (s: string) => string = N.normStreet;
 export const foldText: (s: string) => string = N.foldText;

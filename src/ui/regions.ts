@@ -37,7 +37,7 @@ export function regionsScreen(root: HTMLElement) {
       });
       toast(`${e.name} geladen.`);
     } catch (err) {
-      toast(`Fehler: ${(err as Error).message}`, 5000);
+      toast(`Fehler: ${(err as Error).message}`);
     } finally {
       busy.delete(e.id);
       render();

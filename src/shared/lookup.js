@@ -2,7 +2,7 @@
 // scripts/sample-test.mjs gemeinsam genutzt.
 
 import { foldText, normStreet, editDistance } from './normalize.js';
-import { parseHouseNumber } from './housenumber.js';
+import { parseHouseNumber, normHouseNumber } from './housenumber.js';
 import { makeProjection, projectOnLine, pointAtS, lineLength } from './geo.js';
 
 export const PACKAGE_FORMAT = 'hnf-region';
@@ -49,11 +49,17 @@ export function decodeStreet(s, pkg) {
       plz: plz ?? pkg?.plz ?? '',
     }),
   );
+  const driveways = (s.d ?? []).map(([labels, enc]) => ({
+    norms: labels.map(normHouseNumber),
+    line: decodeLine(enc),
+    user: false,
+  }));
   return {
     id: s.id,
     name: s.n,
     place: s.p ?? '',
     plz: s.z ?? pkg?.plz ?? '',
+    driveways,
     norm: normStreet(s.n),
     fold: foldText(s.n),
     lines,
@@ -129,6 +135,7 @@ export function addUserStreet(index, us) {
     fold: foldText(us.name),
     lines,
     numbers,
+    driveways: [],
     q: null,
     regions: new Set(),
     user: true,
@@ -154,6 +161,13 @@ export function addUserPoint(index, pt) {
   }
   if (!street) {
     street = addUserStreet(index, { id: 'p:' + normStreet(pt.streetName), name: pt.streetName, plz: pt.plz, start: [pt.lat, pt.lon] });
+  }
+  if (pt.kind === 'driveway') {
+    // Eigene Einfahrt: Abzweigung von der Straße zu dieser Hausnummer
+    const norm = normHouseNumber(pt.number);
+    street.driveways = street.driveways.filter((d) => !(d.user && d.norms.includes(norm)));
+    street.driveways.unshift({ norms: [norm], line: [[pt.lat, pt.lon]], user: true, pointId: pt.id });
+    return street;
   }
   const n = makeNumber(pt.number, pt.lat, pt.lon, { source: 'user', plz: pt.plz ?? street.plz, user: true, pointId: pt.id });
   // Eigener Punkt ersetzt einen gleichnamigen Originalpunkt nicht, sondern ergänzt ihn,
@@ -337,4 +351,31 @@ export function sortedNumbers(street) {
     if (b.num === null) return -1;
     return a.num - b.num || a.suffix.localeCompare(b.suffix);
   });
+}
+
+/**
+ * Zufahrt zu einer Hausnummer: eigene Einfahrt vor Daten. Die Linie beginnt an der
+ * Abzweigung von der Straße; bei eigenen Einfahrten führt sie gerade zum Haus.
+ * @returns {{line:number[][], junction:number[], user:boolean, pointId?:string}|null}
+ */
+export function drivewayFor(street, input, result) {
+  const norms = new Set([normHouseNumber(input)]);
+  if (result?.match && (result.status === 'range' || result.status === 'exact')) norms.add(result.match.norm);
+  const list = street.driveways ?? [];
+  const d = list.find((x) => x.user && x.norms.some((n) => norms.has(n))) ?? list.find((x) => x.norms.some((n) => norms.has(n)));
+  if (!d) return null;
+  const line = d.user && result && Number.isFinite(result.lat) ? [d.line[0], [result.lat, result.lon]] : d.line;
+  return { line, junction: line[0], user: d.user, pointId: d.pointId };
+}
+
+/** Abstand eines Punktes zur Straßenlinie in Metern (null ohne Geometrie). */
+export function distanceToStreet(street, lat, lon) {
+  let best = null;
+  const proj = makeProjection(lat, lon);
+  for (const line of street.lines) {
+    if (line.length < 2) continue;
+    const r = projectOnLine([0, 0], line.map(([la, lo]) => proj.toXY(la, lo)));
+    if (r && (best === null || r.dist < best)) best = r.dist;
+  }
+  return best;
 }

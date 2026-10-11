@@ -22,9 +22,11 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props | 
   return e;
 }
 
-/** Kurze Meldung unten am Bildschirm. */
-export function toast(msg: string, ms = 3000) {
+/** Kurze Meldung oben am Bildschirm (verdeckt nie Tastatur oder Karte), nach 2 s weg. */
+export function toast(msg: string, ms = 2000) {
+  document.querySelectorAll('.toast').forEach((o) => o.remove());
   const t = h('div', { class: 'toast', role: 'status' }, msg);
+  t.addEventListener('click', () => t.remove());
   document.body.appendChild(t);
   setTimeout(() => t.classList.add('show'), 10);
   setTimeout(() => {

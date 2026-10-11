@@ -140,6 +140,7 @@ export async function loadCsvAddresses(file, cfg) {
     },
     addresses,
     streetSegments: [],
+    drivewaySegments: [],
     areas: null,
   };
 }

@@ -132,7 +132,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
       choose(r.street);
       toast(`Straße erkannt. Hausnummer bitte eintippen.`);
     } else {
-      toast(`Nicht erkannt: „${r.heard}“. Bitte Tastatur benutzen.`, 4500);
+      toast(`Nicht erkannt: „${r.heard}“. Bitte Tastatur benutzen.`);
     }
   };
 

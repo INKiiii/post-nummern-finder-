@@ -8,7 +8,7 @@ import { normStreet } from '../../src/shared/normalize.js';
 import { normHouseNumber, splitHouseNumbers, completeness, compareHouseNumbers } from '../../src/shared/housenumber.js';
 import { makeProjection, distanceM } from '../../src/shared/geo.js';
 import { encodeLine, PACKAGE_FORMAT, PACKAGE_VERSION } from '../../src/shared/lookup.js';
-import { AreaIndex, PointGrid } from './polygons.mjs';
+import { AreaIndex, PointGrid, SegmentGrid } from './polygons.mjs';
 
 const PLZ_RE = /^\d{5}$/;
 
@@ -256,6 +256,49 @@ export function buildStreets(segments, addresses) {
   return streets;
 }
 
+/**
+ * Ordnet Zufahrtswege (highway=service, service=driveway) den Häusern zu.
+ * Ein Ende muss an einer benannten Straße liegen (Abzweigung, max. 15 m),
+ * das andere Ende beim Haus (Adresse max. 30 m, notfalls 45 m entfernt).
+ * Die Linie beginnt immer an der Straße; der erste Punkt ist die Abzweigung.
+ * @returns {number} Anzahl zugeordneter Zufahrten
+ */
+export function attachDriveways(streets, drivewaySegments) {
+  if (!drivewaySegments?.length) return 0;
+  const roads = new SegmentGrid();
+  const addrs = new PointGrid(0.001);
+  for (const st of streets) {
+    for (const l of st.lines) roads.addLine(l, st);
+    for (const a of st.addresses) addrs.add(a.lat, a.lon, { a, st });
+  }
+  let attached = 0;
+  for (const raw of mergeChains(drivewaySegments)) {
+    const A = raw[0];
+    const B = raw[raw.length - 1];
+    const ja = roads.nearest(A[0], A[1], 15);
+    const jb = roads.nearest(B[0], B[1], 15);
+    if (!ja && !jb) continue;
+    // Abzweigung = das Ende näher an einer Straße; Linie von dort zum Haus
+    const fromA = ja && (!jb || ja.d <= jb.d);
+    const line = fromA ? [...raw] : [...raw].reverse();
+    const junction = fromA ? ja : jb;
+    if (junction.d > 1) line.unshift(junction.point);
+    const end = line[line.length - 1];
+    let houses = addrs.within(end[0], end[1], 30);
+    if (!houses.length) houses = addrs.within(end[0], end[1], 45).slice(0, 1);
+    if (!houses.length) continue;
+    const simplified = simplifyLine(line, 1);
+    const byStreet = new Map();
+    for (const { item } of houses.slice(0, 4)) {
+      const l = byStreet.get(item.st);
+      l ? l.push(item.a.housenumber) : byStreet.set(item.st, [item.a.housenumber]);
+    }
+    for (const [st, labels] of byStreet) (st.driveways ??= []).push({ labels, line: simplified });
+    attached++;
+  }
+  return attached;
+}
+
 function streetMid(st) {
   const longest = st.lines.reduce((a, l) => (l.length > (a?.length ?? 0) ? l : a), null);
   if (longest) return longest[Math.floor(longest.length / 2)];
@@ -427,6 +470,7 @@ export function makePackage(region, sourcesMeta, built) {
         q: { min: q.min, max: q.max, missing: q.missing.slice(0, 200), count: q.count, ratio: Math.round(q.ratio * 1000) / 1000, gap: q.gap },
       };
       if (st.isPlace) s.t = 'place';
+      if (st.driveways?.length) s.d = st.driveways.map((d) => [d.labels, encodeLine(d.line)]);
       return s;
     });
   return {

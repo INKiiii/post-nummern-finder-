@@ -74,6 +74,7 @@ export function loadOsmPbf(file, opts = {}) {
   const addrNodes = [];
   const addrWays = []; // {id, tags(addr), refs}
   const segments = []; // {id, name, highway, refs}
+  const driveways = []; // {id, refs} – Zufahrtswege (highway=service, service=driveway)
   const addrRels = []; // {addr, outer:[wayIds]}
   const areaRels = []; // {kind:'postal'|'admin', level, key, name, ways:[wayIds]}
   const memberWayIds = new Set();
@@ -106,6 +107,8 @@ export function loadOsmPbf(file, opts = {}) {
         const hw = tags.highway;
         if (hw && tags.name && HIGHWAYS.has(hw === 'construction' ? 'construction' : hw) && tags.area !== 'yes') {
           segments.push({ id, name: tags.name, highway: hw, refs: getRefs() });
+        } else if (hw === 'service' && tags.service === 'driveway') {
+          driveways.push({ id, refs: getRefs() });
         }
       });
     }
@@ -136,7 +139,7 @@ export function loadOsmPbf(file, opts = {}) {
     }
     if (++count % 500 === 0) log(`  A: ${count} Blöcke, ${addrNodes.length + addrWays.length} Adressen, ${segments.length} Straßenstücke`);
   }
-  log(`Durchlauf A fertig (${((Date.now() - t0) / 1000).toFixed(0)} s): ${addrNodes.length} Adressknoten, ${addrWays.length} Adresswege, ${addrRels.length} Adressrelationen, ${segments.length} Straßenstücke, ${areaRels.length} Grenzen`);
+  log(`Durchlauf A fertig (${((Date.now() - t0) / 1000).toFixed(0)} s): ${addrNodes.length} Adressknoten, ${addrWays.length} Adresswege, ${addrRels.length} Adressrelationen, ${segments.length} Straßenstücke, ${driveways.length} Zufahrten, ${areaRels.length} Grenzen`);
 
   // ---------- Durchlauf B ----------
   const memberWays = new Map();
@@ -154,6 +157,7 @@ export function loadOsmPbf(file, opts = {}) {
   const need = new IdList();
   for (const w of addrWays) need.pushAll(w.refs);
   for (const s of segments) need.pushAll(s.refs);
+  for (const d of driveways) need.pushAll(d.refs);
   for (const refs of memberWays.values()) need.pushAll(refs);
   const ids = need.sortedUnique();
   const lats = new Int32Array(ids.length);
@@ -226,6 +230,12 @@ export function loadOsmPbf(file, opts = {}) {
     if (pts.length >= 2) streetSegments.push({ name: s.name, highway: s.highway, nodeIds, pts });
   }
 
+  const drivewaySegments = [];
+  for (const d of driveways) {
+    const r = resolve(d.refs);
+    if (r.pts.length >= 2) drivewaySegments.push(r);
+  }
+
   const areas = { postal: [], admin: {} };
   for (const a of areaRels) {
     const rings = assembleRings(a.ways.filter((id) => memberWays.has(id)).map((id) => resolve(memberWays.get(id))));
@@ -247,6 +257,7 @@ export function loadOsmPbf(file, opts = {}) {
     },
     addresses: addresses.map((a) => ({ ...a, source: 'osm' })),
     streetSegments,
+    drivewaySegments,
     areas,
   };
 }

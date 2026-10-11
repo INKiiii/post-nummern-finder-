@@ -12,7 +12,7 @@ export function newStreetScreen(root: HTMLElement, params: { name?: string }) {
   const line: [number, number][] = [];
   let recording = false;
   const name = h('input', { class: 'search', type: 'text', placeholder: 'Straßenname', value: params.name ?? '', autocapitalize: 'words' }) as HTMLInputElement;
-  const map = new MapView();
+  const map = new MapView({ allowHeading: false }); // beim Zeichnen immer Norden oben
   const info = h('div', { class: 'muted center' });
   const recBtn = h('button', { class: 'btn' });
 
@@ -94,7 +94,7 @@ export function newStreetScreen(root: HTMLElement, params: { name?: string }) {
       created: Date.now(),
       updated: Date.now(),
     });
-    toast(`Straße „${n}“ angelegt. Hausnummern per langem Drücken auf der Karte setzen.`, 4500);
+    toast(`Straße „${n}“ angelegt. Hausnummern per langem Drücken auf der Karte setzen.`);
     show('start', { streetId: 'u:' + id }, false);
   };
 

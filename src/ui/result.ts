@@ -1,11 +1,11 @@
 // Ergebnisbildschirm: Entfernung, Straßenseite, Haus-Info, Karte, "Nächster Brief".
 
-import { h, overlay, toast } from './dom';
+import { h, overlay, toast, confirmBig } from './dom';
 import { show } from './app';
 import { keypad } from './keypad';
 import { openEditor } from './editor';
-import { state, savePoint, uid } from '../data';
-import { findHouse, normHouseNumber, distanceM } from '../core';
+import { state, savePoint, deletePoint, uid } from '../data';
+import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet } from '../core';
 import { gps, type Fix } from '../gps';
 import { computeGuidance, formatDistance } from '../guidance';
 import { MapView } from '../mapview';
@@ -52,6 +52,9 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
   const sideEl = h('div', { class: 'side' });
   const gpsEl = h('div', { class: 'gps-status' });
   const noteEl = h('div', { class: 'note' });
+  const placeEl = h('div', { class: 'note place-note' });
+  const driveEl = h('div', { class: 'drive-guide' });
+  let drive: ReturnType<typeof drivewayFor> = null;
   const infoCard = h('button', { class: 'info-card' });
   const map = new MapView();
 
@@ -64,9 +67,19 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       ...[
         res.estimated && res.status !== 'none' ? h('span', { class: 'badge-est' }, 'geschätzt') : null,
         txt ? h('span', null, ' ' + txt) : null,
+        res.estimated && number ? h('span', { class: 'muted' }, ' · lang auf Karte drücken zum Setzen') : null,
       ].filter((x): x is HTMLSpanElement => !!x),
     );
     noteEl.hidden = !txt && !res.estimated;
+
+    // Abstand Haus – Straße (ab 20 m) und Zufahrt
+    const t = target();
+    const off = t && res.status !== 'street' ? distanceToStreet(street, t.lat, t.lon) : null;
+    const parts: string[] = [];
+    if (off !== null && off > 20) parts.push(`Haus liegt ${Math.round(off)} m von der Straße entfernt`);
+    if (drive) parts.push(drive.user ? 'Einfahrt selbst gesetzt' : 'Zufahrt aus den Daten');
+    placeEl.textContent = parts.join(' · ');
+    placeEl.hidden = !parts.length;
   };
 
   const renderInfo = () => {
@@ -109,19 +122,37 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         ...(g.behind ? [h('span', { class: 'behind' }, 'hinter dir')] : []),
       );
     gpsEl.textContent = `Luftlinie · GPS ±${Math.round(fix.accuracy)} m${fix.heading === null ? ' · Fahrtrichtung unbekannt' : ''}`;
+    if (drive) {
+      const [jl, jo] = drive.junction;
+      const gj = computeGuidance(fix, { lat: jl, lon: jo }, street);
+      // Die Abzweigung liegt auf der Straße; die Seite ergibt sich aus der Richtung der Zufahrt
+      const away = drive.line[1] ?? drive.line[0];
+      const gs = computeGuidance(fix, { lat: away[0], lon: away[1] }, street);
+      gj.side = gs.side;
+      const side = gj.side === 'links' ? 'links' : gj.side === 'rechts' ? 'rechts' : gj.side === 'geradeaus' ? 'geradeaus' : '';
+      driveEl.textContent = gj.distance < 10 ? 'Einfahrt: hier abbiegen' : `Einfahrt in ${formatDistance(gj.distance)}${side ? ' ' + side : ''}${gj.behind ? ' (hinter dir)' : ''}`;
+      driveEl.hidden = false;
+    } else driveEl.hidden = true;
   };
 
   const refresh = () => {
     // Nach dem Speichern eigener Punkte wird der Index neu aufgebaut
     street = state.index.streets.get(street.id) ?? street;
     res = findHouse(street, number);
+    drive = number ? drivewayFor(street, number, res) : null;
     renderNote();
-    map.update({ target: target(), neighbors: res.estimated ? res.neighbors : [], focus: street, index: state.index });
+    map.update({
+      target: target(),
+      neighbors: res.estimated ? res.neighbors : [],
+      focus: street,
+      index: state.index,
+      driveway: drive ? { line: drive.line, user: drive.user } : null,
+    });
     renderGuidance(gps.fix, gps.error ?? undefined);
   };
 
   // Lang auf die Karte tippen: Hausnummer hier setzen (Lücken selbst schließen)
-  map.onLongPress = (lat, lon) => addPointDialog(street, lat, lon, number, refresh);
+  map.onLongPress = (lat, lon) => longPressMenu(street, lat, lon, number, drive, refresh);
 
   const nextLetter = () => {
     if (speechSupported()) show('start', { listen: true }, false);
@@ -140,7 +171,7 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
         h('div', { class: 'addr-place' }, [street.place, street.plz].filter(Boolean).join(' · ')),
       ),
     ),
-    h('section', { class: 'guidance' }, h('div', { class: 'guidance-row' }, distEl, sideEl), noteEl, gpsEl),
+    h('section', { class: 'guidance' }, h('div', { class: 'guidance-row' }, distEl, sideEl), driveEl, noteEl, placeEl, gpsEl),
     infoCard,
     map.root,
     h(
@@ -149,9 +180,6 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
       h('button', { class: 'btn huge primary', onClick: nextLetter }, speechSupported() ? '🎤 Nächster Brief' : 'Nächster Brief'),
     ),
   );
-  if (res.estimated && number) {
-    toast('Tipp: Lang auf die Karte drücken, um die echte Lage zu setzen.', 3500);
-  }
   renderInfo();
   refresh();
   const unsub = gps.subscribe((fix, err) => {
@@ -159,6 +187,60 @@ export function resultScreen(root: HTMLElement, params: { streetId: string; numb
     map.update({ user: fix });
   });
   return () => unsub();
+}
+
+/** Langes Drücken: Hausnummer oder Einfahrt an dieser Stelle setzen. */
+function longPressMenu(
+  street: Street,
+  lat: number,
+  lon: number,
+  number: string,
+  drive: ReturnType<typeof drivewayFor>,
+  onSaved: () => void,
+) {
+  if (!number) {
+    addPointDialog(street, lat, lon, '', onSaved);
+    return;
+  }
+  const setDriveway = async () => {
+    close();
+    const existing = state.points.find(
+      (p) => p.kind === 'driveway' && p.streetName === street.name && normHouseNumber(p.number) === normHouseNumber(number),
+    );
+    await savePoint({
+      id: existing?.id ?? uid(),
+      kind: 'driveway',
+      streetId: street.id,
+      streetName: street.name,
+      number,
+      plz: street.plz,
+      lat,
+      lon,
+      created: existing?.created ?? Date.now(),
+      updated: Date.now(),
+    });
+    toast(`Einfahrt zu ${number} gesetzt.`);
+    onSaved();
+  };
+  const removeDriveway = async () => {
+    close();
+    if (drive?.pointId && (await confirmBig(`Eigene Einfahrt zu ${number} löschen?`, 'Löschen'))) {
+      await deletePoint(drive.pointId);
+      onSaved();
+    }
+  };
+  const close = overlay(
+    h(
+      'div',
+      { class: 'dialog' },
+      h('h2', null, 'Hier setzen'),
+      h('button', { class: 'btn big primary', onClick: setDriveway }, `⤴ Einfahrt zu ${number}`),
+      h('p', { class: 'muted small' }, 'Die Stelle, an der man von der Straße abbiegt. Wird lokal gespeichert und mit exportiert.'),
+      h('button', { class: 'btn big', onClick: () => (close(), addPointDialog(street, lat, lon, number, onSaved)) }, '# Hausnummer an dieser Stelle'),
+      drive?.user ? h('button', { class: 'btn big danger', onClick: removeDriveway }, 'Eigene Einfahrt löschen') : null,
+      h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
+    ),
+  );
 }
 
 /** Dialog: eigene Hausnummer an der gedrückten Stelle setzen. */
@@ -184,9 +266,12 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
       return;
     }
     // Vorhandenen eigenen Punkt gleicher Nummer ersetzen
-    const existing = state.points.find((p) => p.streetName === chosen.name && normHouseNumber(p.number) === normHouseNumber(value));
+    const existing = state.points.find(
+      (p) => p.kind !== 'driveway' && p.streetName === chosen.name && normHouseNumber(p.number) === normHouseNumber(value),
+    );
     await savePoint({
       id: existing?.id ?? uid(),
+      kind: 'number',
       streetId: chosen.id,
       streetName: chosen.name,
       number: value,

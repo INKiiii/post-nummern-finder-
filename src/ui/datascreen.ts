@@ -14,7 +14,7 @@ export function dataScreen(root: HTMLElement) {
     const infos = await loadHouseInfos();
     counts.textContent = `${infos.size} Haus-Infos · ${state.points.length} eigene Punkte · ${state.ustreets.length} eigene Straßen`;
     lists.replaceChildren(
-      h('h2', null, 'Eigene Punkte'),
+      h('h2', null, 'Eigene Punkte und Einfahrten'),
       ...(state.points.length
         ? [...state.points]
             .sort((a, b) => (a.streetName + a.number).localeCompare(b.streetName + b.number, 'de', { numeric: true }))
@@ -22,7 +22,7 @@ export function dataScreen(root: HTMLElement) {
               h(
                 'div',
                 { class: 'list-row' },
-                h('span', null, `${p.streetName} ${p.number}`),
+                h('span', null, p.kind === 'driveway' ? `Einfahrt zu ${p.streetName} ${p.number}` : `${p.streetName} ${p.number}`),
                 h('span', { class: 'muted' }, formatDate(p.updated)),
                 h(
                   'button',
@@ -39,7 +39,7 @@ export function dataScreen(root: HTMLElement) {
                 ),
               ),
             )
-        : [h('p', { class: 'muted' }, 'Keine. Auf der Karte lang drücken, um eine Hausnummer zu setzen.')]),
+        : [h('p', { class: 'muted' }, 'Keine. Auf der Karte lang drücken, um eine Hausnummer oder Einfahrt zu setzen.')]),
       h('h2', null, 'Eigene Straßen'),
       ...(state.ustreets.length
         ? state.ustreets.map((s) =>
@@ -95,12 +95,12 @@ export function dataScreen(root: HTMLElement) {
     try {
       const r = await importUserData(await f.text());
       toast(
-        `Importiert: ${r.houseinfo.added} neue, ${r.houseinfo.updated} aktualisierte Haus-Infos, ${r.points.added + r.points.updated} Punkte, ${r.streets.added + r.streets.updated} Straßen.`,
+        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
         5000,
       );
       void render();
     } catch (e) {
-      toast(`Import fehlgeschlagen: ${(e as Error).message}`, 5000);
+      toast(`Import fehlgeschlagen: ${(e as Error).message}`);
     }
     fileInput.value = '';
   });

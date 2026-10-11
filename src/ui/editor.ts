@@ -22,7 +22,7 @@ export function openEditor(street: Street, number: string, original: HouseInfo, 
 
   const checkNote = () => {
     const w = nameWarning(note.value);
-    warn.textContent = w ?? '';
+    warn.textContent = w ? `${w} So kann nicht gespeichert werden.` : '';
     const wasHidden = warn.hidden;
     warn.hidden = !w;
     if (w && wasHidden) warn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -116,8 +116,14 @@ export function openEditor(street: Street, number: string, original: HouseInfo, 
   };
 
   const save = async () => {
+    // Namen werden nie gespeichert: Speichern ablehnen, bis der Hinweis geändert ist
     const w = nameWarning(info.note);
-    if (w && !(await confirmBig(`${w}\n\nTrotzdem speichern?`, 'Speichern', 'Ändern'))) return;
+    if (w) {
+      checkNote();
+      note.focus();
+      toast('Nicht gespeichert: Hinweis enthält einen Namen.');
+      return;
+    }
     if (isEmpty(info)) await deleteHouseInfo(info.key);
     else await saveHouseInfo(info);
     close();
@@ -167,8 +173,8 @@ export function openEditor(street: Street, number: string, original: HouseInfo, 
             ),
           ),
         ),
-        note,
         warn,
+        note,
         original.updated ? h('button', { class: 'btn danger', onClick: remove }, 'Haus-Info löschen') : null,
       ),
       h('footer', { class: 'bottombar' }, h('button', { class: 'btn huge primary', onClick: save }, 'Speichern')),

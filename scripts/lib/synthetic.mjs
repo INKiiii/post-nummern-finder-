@@ -59,12 +59,17 @@ export function makeSyntheticTown(origin = SYNTH_ORIGIN) {
     if (missing.has(n)) continue;
     // ungerade Nummern nördlich (links in Fahrtrichtung Ost), gerade südlich
     const x = -980 + Math.floor((n - 1) / 2) * 20;
-    const y = yAt(x) + (n % 2 === 1 ? 15 : -15);
+    // Nr. 61 liegt 70 m hinter der Straße und hat eine Zufahrt (siehe unten)
+    const y = yAt(x) + (n === 61 ? 70 : n % 2 === 1 ? 15 : -15);
     const plz = x < 0 ? '00001' : '00002';
     const city = x < 0 ? 'Musterdorf' : 'Beispielhausen';
     if (n % 3 === 0) node(x, y, addr('Elbuferstraße', String(n), plz, city));
     else square(x, y, 10, addr('Elbuferstraße', String(n), plz, n === 5 ? '' : city));
   }
+
+  // Zufahrt zu Nr. 61 (beginnt 3 m neben der Straße) und eine Zufahrt ohne Straßenanschluss
+  way(line([[-372, 3], [-372, 40], [-374, 62]]), { highway: 'service', service: 'driveway' });
+  way(line([[-200, 500], [-200, 540]]), { highway: 'service', service: 'driveway' });
 
   // --- Blumenstraße: Nord-Süd bei x=-300, Nummern 1..20 mit Sonderfällen ---
   const b = line([

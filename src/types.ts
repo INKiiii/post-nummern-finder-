@@ -23,6 +23,7 @@ export interface Street {
   fold: string;
   lines: [number, number][][];
   numbers: HouseNumber[];
+  driveways: { norms: string[]; line: [number, number][]; user: boolean; pointId?: string }[];
   q: { min: number | null; max: number | null; missing: number[]; count: number; ratio: number; gap: boolean } | null;
   regions: Set<string>;
   user: boolean;
@@ -107,6 +108,8 @@ export interface HouseInfo {
 
 export interface UserPoint {
   id: string;
+  /** 'number' = eigene Hausnummer (Standard), 'driveway' = eigene Einfahrt zu dieser Nummer */
+  kind?: 'number' | 'driveway';
   streetId: string | null;
   streetName: string;
   number: string;

@@ -145,3 +145,69 @@ export class PointGrid {
     return best;
   }
 }
+
+/** Alle Einträge im Umkreis (Meter), nach Abstand sortiert. */
+PointGrid.prototype.within = function (lat, lon, radiusM) {
+  const kx = Math.cos((lat * Math.PI) / 180);
+  const r = Math.ceil(radiusM / 111320 / this.cell) + 1;
+  const gy = Math.floor(lat / this.cell);
+  const gx = Math.floor(lon / this.cell);
+  const out = [];
+  for (let dy = -r; dy <= r; dy++)
+    for (let dx = -r; dx <= r; dx++)
+      for (const [la, lo, item] of this.grid.get((gy + dy) * 100000 + gx + dx) ?? []) {
+        const d = Math.hypot((la - lat) * 111320, (lo - lon) * 111320 * kx);
+        if (d <= radiusM) out.push({ item, d });
+      }
+  return out.sort((a, b) => a.d - b.d);
+};
+
+/** Raster über Liniensegmente für "nächster Punkt auf einer Straße". */
+export class SegmentGrid {
+  constructor(cell = 0.002) {
+    this.cell = cell;
+    this.grid = new Map();
+  }
+  addLine(pts, item) {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const y0 = Math.floor(Math.min(a[0], b[0]) / this.cell);
+      const y1 = Math.floor(Math.max(a[0], b[0]) / this.cell);
+      const x0 = Math.floor(Math.min(a[1], b[1]) / this.cell);
+      const x1 = Math.floor(Math.max(a[1], b[1]) / this.cell);
+      for (let y = y0; y <= y1; y++)
+        for (let x = x0; x <= x1; x++) {
+          const k = y * 100000 + x;
+          const l = this.grid.get(k);
+          l ? l.push([a, b, item]) : this.grid.set(k, [[a, b, item]]);
+        }
+    }
+  }
+  /** Nächster Punkt auf einer Linie im Umkreis von maxM Metern oder null. */
+  nearest(lat, lon, maxM = 50) {
+    const kx = 111320 * Math.cos((lat * Math.PI) / 180);
+    const ky = 111320;
+    const r = Math.ceil(maxM / 111320 / this.cell) + 1;
+    const gy = Math.floor(lat / this.cell);
+    const gx = Math.floor(lon / this.cell);
+    let best = null;
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++)
+        for (const [a, b, item] of this.grid.get((gy + dy) * 100000 + gx + dx) ?? []) {
+          const ax = (a[1] - lon) * kx;
+          const ay = (a[0] - lat) * ky;
+          const bx = (b[1] - lon) * kx;
+          const by = (b[0] - lat) * ky;
+          const vx = bx - ax;
+          const vy = by - ay;
+          const l2 = vx * vx + vy * vy;
+          const t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * vx + ay * vy) / l2)) : 0;
+          const px = ax + t * vx;
+          const py = ay + t * vy;
+          const d = Math.hypot(px, py);
+          if (d <= maxM && (!best || d < best.d)) best = { d, point: [lat + py / ky, lon + px / kx], item };
+        }
+    return best;
+  }
+}

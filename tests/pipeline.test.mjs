@@ -6,8 +6,8 @@ import path from 'node:path';
 import { writePbf } from '../scripts/lib/pbf-writer.mjs';
 import { makeSyntheticTown } from '../scripts/lib/synthetic.mjs';
 import { loadOsmPbf } from '../scripts/lib/sources/osm-pbf.mjs';
-import { mergeAddresses, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
-import { buildIndex, searchStreets, findHouse } from '../src/shared/lookup.js';
+import { mergeAddresses, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage } from '../scripts/lib/regions.mjs';
+import { buildIndex, searchStreets, findHouse, decodeLine, drivewayFor, distanceToStreet } from '../src/shared/lookup.js';
 import { distanceM } from '../src/shared/geo.js';
 
 let pkgs;
@@ -19,6 +19,7 @@ function build(opts = {}) {
   const src = loadOsmPbf(file);
   const { addresses } = mergeAddresses([src]);
   const streets = buildStreets(src.streetSegments, addresses);
+  attachDriveways(streets, src.drivewaySegments);
   assignStreetIds(streets);
   const { regions } = assignRegions(streets, src.areas, { group: 'plz', ...opts });
   return regions.map((r) => makePackage(r, [src.meta], 'test'));
@@ -66,6 +67,19 @@ describe('Regionspakete', () => {
     const deich = pkgs[0].streets.find((s) => s.n === 'Am Deich');
     expect(deich.l.length).toBe(0);
     expect(deich.h.length).toBe(2);
+  });
+
+  it('ordnet Zufahrtswege dem Haus zu, beginnend an der Straße', () => {
+    const e = pkgs[0].streets.find((s) => s.n === 'Elbuferstraße');
+    expect(e.d.length).toBe(1);
+    const [labels, enc] = e.d[0];
+    expect(labels).toEqual(['61']);
+    const line = decodeLine(enc);
+    const [x0, y0] = town.proj.toXY(...line[0]);
+    expect(Math.abs(y0)).toBeLessThan(0.5); // Abzweigung liegt auf der Straße
+    expect(x0).toBeCloseTo(-372, 0);
+    const [, y1] = town.proj.toXY(...line[line.length - 1]);
+    expect(y1).toBeGreaterThan(55);
   });
 
   it('trennt gleichnamige Straßen in verschiedenen Orten', () => {
@@ -132,4 +146,33 @@ describe('Suche und Lage (App-Logik)', () => {
     expect(k.user).toBe(true);
     expect(findHouse(k, '1').status).toBe('street');
   });
+
+  it('liefert Zufahrt und Abstand zur Straße für zurückgesetzte Häuser', () => {
+    const idx = buildIndex(pkgs);
+    const e = searchStreets(idx, 'Elbuferstraße')[0];
+    const r = findHouse(e, '61');
+    const d = drivewayFor(e, '61', r);
+    expect(d.user).toBe(false);
+    expect(Math.abs(town.proj.toXY(...d.junction)[1])).toBeLessThan(0.5);
+    expect(distanceToStreet(e, r.lat, r.lon)).toBeGreaterThan(60);
+    expect(distanceToStreet(e, ...[findHouse(e, '59')].map((x) => [x.lat, x.lon])[0])).toBeLessThan(20);
+    expect(drivewayFor(e, '59', findHouse(e, '59'))).toBeNull();
+  });
+
+  it('eigene Einfahrt hat Vorrang und führt zum Haus', () => {
+    const idx0 = buildIndex(pkgs);
+    const e0 = searchStreets(idx0, 'Elbuferstraße')[0];
+    const [jl, jo] = town.proj.toLatLon(-580, 0);
+    const idx = buildIndex(pkgs, {
+      points: [{ id: 'd1', kind: 'driveway', streetId: e0.id, streetName: 'Elbuferstraße', number: '42', lat: jl, lon: jo, updated: 1, created: 1 }],
+    });
+    const e = idx.streets.get(e0.id);
+    const r = findHouse(e, '42');
+    expect(r.status).toBe('exact'); // Einfahrt ist keine Hausnummer
+    const d = drivewayFor(e, '42', r);
+    expect(d.user).toBe(true);
+    expect(d.line[0]).toEqual([jl, jo]);
+    expect(d.line[1]).toEqual([r.lat, r.lon]);
+  });
 });
+

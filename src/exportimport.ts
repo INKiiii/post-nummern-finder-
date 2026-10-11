@@ -4,6 +4,7 @@
 import * as db from './db';
 import { loadHouseInfos } from './houseinfo';
 import { state, rebuildIndex } from './data';
+import { nameWarning } from './namecheck';
 import type { HouseInfo, UserPoint, UserStreet } from './types';
 
 export const USERDATA_FORMAT = 'hnf-userdata';
@@ -48,7 +49,7 @@ export function mergeRecords<T extends { updated: number }>(mine: T[], theirs: T
   return { result: [...map.values()], added, updated };
 }
 
-function validate(data: any): UserDataFile {
+function validate(data: any): UserDataFile & { namesRemoved: number } {
   if (!data || data.format !== USERDATA_FORMAT) throw new Error('Keine Hausnummern-Finder-Datei.');
   const arr = (x: unknown) => (Array.isArray(x) ? x : []);
   const houseinfo = arr(data.houseinfo).filter(
@@ -59,14 +60,21 @@ function validate(data: any): UserDataFile {
   ) as UserPoint[];
   const streets = arr(data.streets).filter((s: any) => typeof s?.id === 'string' && typeof s.name === 'string') as UserStreet[];
   // Nur bekannte Felder übernehmen
+  let namesRemoved = 0;
   for (const h of houseinfo) {
     h.entrances = h.entrances
       .filter((e: any) => typeof e?.pos === 'string')
       .map((e: any) => ({ pos: String(e.pos).slice(0, 40), boxes: Math.max(0, Math.min(99, Number(e.boxes) || 0)) }));
     h.note = String(h.note ?? '').slice(0, 80);
+    // Hinweise mit erkanntem Namen werden nicht übernommen
+    if (nameWarning(h.note)) {
+      h.note = '';
+      namesRemoved++;
+    }
     h.updated = Number(h.updated) || 0;
   }
-  return { ...data, houseinfo, points, streets };
+  for (const p of points) if (p.kind !== 'driveway') p.kind = 'number';
+  return { ...data, houseinfo, points, streets, namesRemoved };
 }
 
 export async function importUserData(json: string) {
@@ -84,5 +92,5 @@ export async function importUserData(json: string) {
   state.points = pts.result;
   state.ustreets = sts.result;
   rebuildIndex();
-  return { houseinfo: hi, points: pts, streets: sts };
+  return { houseinfo: hi, points: pts, streets: sts, namesRemoved: data.namesRemoved };
 }

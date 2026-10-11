@@ -67,7 +67,7 @@ export async function listenForAddress(): Promise<VoiceResult | null> {
   } catch (e) {
     if (!closed) {
       close();
-      toast((e as Error).message + ' Bitte die Tastatur benutzen.', 4000);
+      toast((e as Error).message + ' Bitte die Tastatur benutzen.');
     }
     return null;
   }

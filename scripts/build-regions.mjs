@@ -9,7 +9,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { loadOsmPbf } from './lib/sources/osm-pbf.mjs';
 import { loadCsvAddresses } from './lib/sources/csv-addresses.mjs';
-import { mergeAddresses, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
+import { mergeAddresses, attachDriveways, buildStreets, assignRegions, assignStreetIds, makePackage, writePackage } from './lib/regions.mjs';
 import { describeStreet, writeReport, loadAllPackages } from './lib/report.mjs';
 
 const HELP = `
@@ -120,6 +120,8 @@ async function main() {
   }
 
   const streets = buildStreets(segments, addresses);
+  const driveways = attachDriveways(streets, sources.flatMap((s) => s.drivewaySegments ?? []));
+  console.error(`Zufahrtswege Häusern zugeordnet: ${fmt(driveways)}`);
   assignStreetIds(streets);
   const { regions, unassigned } = assignRegions(streets, areas, {
     group: values.group,
