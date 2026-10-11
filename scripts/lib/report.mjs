@@ -18,14 +18,26 @@ export function loadAllPackages(dir) {
   return index.regions.map((r) => ({ meta: r, pkg: readPackage(path.join(dir, r.file)) }));
 }
 
-/** Bewertet eine Straße: 0 = keine Nummern, 1 = lückenlos. */
+/** Weg ohne Häuser: keine Nummern und auch keine Wohngebäude an der Straße. */
+export function noHouses(q) {
+  return !!q && q.gap && q.bu === 0;
+}
+
+/**
+ * Bewertet eine Straße: 0 = Häuser ohne Nummern (echte Lücke), 1 = lückenlos.
+ * Wege ohne Häuser sind kein Fehler und landen am Ende (2).
+ */
 export function streetScore(q) {
-  if (!q || q.gap) return 0;
+  if (!q) return 0;
+  if (noHouses(q)) return 2;
+  if (q.gap) return 0;
   return q.ratio;
 }
 
 export function statusText(q) {
-  if (!q || q.gap) return 'keine Hausnummern';
+  if (!q) return 'keine Hausnummern';
+  if (noHouses(q)) return 'Weg ohne Häuser';
+  if (q.gap) return q.bu ? `keine Hausnummern, ${q.bu} Gebäude` : 'keine Hausnummern';
   if (q.missing.length === 0) return 'vollständig';
   if (q.ratio < 0.5) return 'große Lücken';
   return 'Lücken';
@@ -33,10 +45,12 @@ export function statusText(q) {
 
 /** Beschreibung wie "Nummern 1 bis 40 vorhanden (35), es fehlen 17, 23 und 24". */
 export function describeStreet(q) {
-  if (!q || q.gap) return 'LÜCKE: keine Hausnummern in den Daten';
+  if (noHouses(q)) return 'Weg ohne Häuser (keine Wohngebäude an der Straße)';
+  if (!q || q.gap) return `LÜCKE: keine Hausnummern in den Daten${q?.bu ? `, aber ${q.bu} Gebäude ohne Nummer` : ''}`;
   const base = `Nummern ${q.min} bis ${q.max} vorhanden (${q.count})`;
-  if (!q.missing.length) return base + ', lückenlos';
-  return `${base}, es fehlen ${formatRanges(q.missing, 15)}`;
+  const bld = q.bu ? ` · ${q.bu} Gebäude ohne Nummer` : '';
+  if (!q.missing.length) return base + ', lückenlos' + bld;
+  return `${base}, es fehlen ${formatRanges(q.missing, 15)}${bld}`;
 }
 
 function csvCell(v) {
@@ -72,6 +86,7 @@ export function writeReport(packages, file) {
           q && !q.gap ? Math.round(q.ratio * 100) : 0,
           statusText(q),
           s.l?.length ? 'ja' : 'nein',
+          q?.bu ?? 0,
         ],
       };
       seen.set(s.id, row);
@@ -80,9 +95,10 @@ export function writeReport(packages, file) {
   }
   // Schlechteste zuerst; bei gleicher Quote die mit mehr fehlenden Nummern.
   rows.sort((a, b) => a.score - b.score || b.cols[7] - a.cols[7] || String(a.cols[2]).localeCompare(String(b.cols[2]), 'de'));
-  const header = ['gebiet', 'gebietsname', 'strasse', 'ort', 'anzahl_nummern', 'min', 'max', 'anzahl_fehlend', 'fehlende_nummern', 'vollstaendigkeit_prozent', 'status', 'geometrie'];
+  const header = ['gebiet', 'gebietsname', 'strasse', 'ort', 'anzahl_nummern', 'min', 'max', 'anzahl_fehlend', 'fehlende_nummern', 'vollstaendigkeit_prozent', 'status', 'geometrie', 'gebaeude_ohne_nummer'];
   const lines = [header.join(';'), ...rows.map((r) => r.cols.map(csvCell).join(';'))];
   fs.writeFileSync(file, '\uFEFF' + lines.join('\n') + '\n');
   const gaps = rows.filter((r) => r.score === 0).length;
-  return { streets: rows.length, gaps };
+  const paths = rows.filter((r) => r.score === 2).length;
+  return { streets: rows.length, gaps, paths };
 }

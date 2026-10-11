@@ -36,8 +36,29 @@ jobs:
           mkdir -p data/osm
           curl -fL --retry 3 -o data/osm/niedersachsen-latest.osm.pbf \
             https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf
+      # Optional: amtliche Adressen (z. B. Hauskoordinaten) zusätzlich zu OSM.
+      # Einrichten unter Settings › Secrets and variables › Actions › Variables:
+      #   OFFICIAL_ADDR_URL    = Download-Adresse der CSV- oder ZIP-Datei
+      #   OFFICIAL_ADDR_CONFIG = Spalten-Konfiguration (Standard: scripts/sources/niedersachsen-hk.json)
+      - name: Amtliche Adressen laden (optional)
+        if: ${{ vars.OFFICIAL_ADDR_URL != '' }}
+        env:
+          URL: ${{ vars.OFFICIAL_ADDR_URL }}
+          CONFIG: ${{ vars.OFFICIAL_ADDR_CONFIG || 'scripts/sources/niedersachsen-hk.json' }}
+        run: |
+          mkdir -p data/official
+          curl -fL --retry 3 -o data/official/download "$URL"
+          if unzip -tq data/official/download >/dev/null 2>&1; then
+            unzip -o -q data/official/download -d data/official
+            f=$(find data/official -iname '*.csv' -o -iname '*.txt' | head -1)
+          else
+            f=data/official/download
+          fi
+          echo "Amtliche Datei: $f"
+          head -3 "$f" || true
+          echo "OFFICIAL_ARG=--official $f:$CONFIG" >> "$GITHUB_ENV"
       - name: Regionspakete bauen (alle PLZ in Niedersachsen)
-        run: npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --state Niedersachsen --details 21395,21436
+        run: npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --state Niedersachsen --details 21395,21436 $OFFICIAL_ARG
       - name: Stichprobentest
         run: npm run sample-test
       - name: App bauen

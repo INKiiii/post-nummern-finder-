@@ -5,7 +5,7 @@ import { show } from './app';
 import { keypad } from './keypad';
 import { openEditor } from './editor';
 import { state, savePoint, deletePoint, uid } from '../data';
-import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet } from '../core';
+import { findHouse, normHouseNumber, distanceM, drivewayFor, distanceToStreet, snapToBuilding } from '../core';
 import { gps, type Fix } from '../gps';
 import { computeGuidance, formatDistance } from '../guidance';
 import { MapView } from '../mapview';
@@ -16,10 +16,18 @@ import { locationDeniedBox } from './location';
 import type { FindResult, Street } from '../types';
 
 function statusNote(res: FindResult, number: string): string {
+  const base = statusBase(res, number);
+  if (res.snapped) return `${base} · auf Gebäude ohne Nummer gesetzt`;
+  return base;
+}
+
+function statusBase(res: FindResult, number: string): string {
   const nb = res.neighbors.map((n) => n.label);
   switch (res.status) {
     case 'exact':
-      return res.match?.user ? 'selbst gesetzt' : '';
+      if (res.match?.user) return 'selbst gesetzt';
+      if (res.match?.source === 'osm-interp') return 'Lage aus OSM-Interpolationslinie';
+      return '';
     case 'range':
       return `liegt in ${res.match?.label}`;
     case 'base':
@@ -282,6 +290,8 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
     const existing = state.points.find(
       (p) => p.kind !== 'driveway' && p.streetName === chosen.name && normHouseNumber(p.number) === normHouseNumber(value),
     );
+    // Liegt die gedrückte Stelle auf/an einem Gebäude ohne Nummer, dessen Mitte nehmen
+    const snap = snapToBuilding(chosen, lat, lon, 12);
     await savePoint({
       id: existing?.id ?? uid(),
       kind: 'number',
@@ -289,8 +299,8 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
       streetName: chosen.name,
       number: value,
       plz: chosen.plz,
-      lat,
-      lon,
+      lat: snap?.[0] ?? lat,
+      lon: snap?.[1] ?? lon,
       created: existing?.created ?? Date.now(),
       updated: Date.now(),
     });

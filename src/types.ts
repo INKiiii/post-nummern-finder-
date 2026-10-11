@@ -23,6 +23,8 @@ export interface Street {
   fold: string;
   lines: [number, number][][];
   numbers: HouseNumber[];
+  /** Wohngebäude ohne Hausnummer an dieser Straße */
+  buildings: [number, number][];
   driveways: { norms: string[]; line: [number, number][]; user: boolean; pointId?: string }[];
   q: { min: number | null; max: number | null; missing: number[]; count: number; ratio: number; gap: boolean } | null;
   regions: Set<string>;
@@ -41,6 +43,8 @@ export interface FindResult {
   lat: number;
   lon: number;
   estimated: boolean;
+  /** Geschätzte Lage wurde auf ein Gebäude ohne Hausnummer gesetzt */
+  snapped?: boolean;
   match?: HouseNumber;
   neighbors: HouseNumber[];
 }

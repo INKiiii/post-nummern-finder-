@@ -30,14 +30,31 @@ npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --only 21
 * Im Terminal steht pro Gebiet die Zahl der Straßen, Hausnummern und Straßen ohne Nummern. Mit `--details` kommt pro Straße z. B. `Nummern 1 bis 195 vorhanden (181), es fehlen 17, 23–24, 100–110` bzw. `LÜCKE: keine Hausnummern in den Daten`.
 * PLZ-Pakete sind meist deutlich kleiner als 1 MB (gut für das Handy). Wer größere Pakete möchte, nimmt `--group kreis`.
 
+### Lücken in den Daten: was die App selbst schließt
+
+OpenStreetMap ist nicht überall vollständig. Der Build holt deshalb alles heraus, was in den Daten steckt:
+
+* **Interpolationslinien** (`addr:interpolation`): Wo in OSM nur Anfangs- und Endnummer mit einer Linie dazwischen eingetragen sind, werden die Nummern dazwischen erzeugt. In der App sind sie „geschätzt“ markiert („Lage aus OSM-Interpolationslinie“).
+* **Gebäude ohne Hausnummer:** Wohngebäude ohne Nummer werden der nächsten Straße zugeordnet. Fehlt eine Nummer, setzt die App die geschätzte Lage auf das passende Gebäude derselben Straßenseite („auf Gebäude ohne Nummer gesetzt“). Auf der Karte erscheinen diese Gebäude als kleine Quadrate. Beim langen Drücken rastet ein eigener Punkt auf das Gebäude ein.
+* **Doppelte Straßen:** Abgetrennte Stücke ohne Hausnummern (z. B. Feldweg-Fortsetzungen) werden mit der gleichnamigen Straße bis 1,5 km Entfernung zusammengeführt.
+* **Wege ohne Häuser:** Straßen ohne Nummern **und** ohne Wohngebäude (Feld- und Deichwege) gelten nicht als Lücke. Sie heißen in der App „Weg ohne Häuser“ und stehen im Bericht am Ende. Echte Lücken („keine Hausnummern, N Gebäude“) stehen ganz oben in `report.csv`.
+
+Was dann noch fehlt, lässt sich nur mit besseren Daten schließen:
+
+1. **Amtliche Hauskoordinaten** (siehe unten). Sie enthalten jede vergebene Hausnummer und sind die vollständigste Quelle.
+2. **In OSM nachtragen**, z. B. mit der App *Every Door* (iPhone und Android) direkt vor Ort. Der wöchentliche Build übernimmt Änderungen automatisch.
+3. **Eigene Punkte** in der App setzen und über „Haus-Infos sichern“ mit Kollegen teilen.
+
 ### Amtliche Adressdaten zusammenführen
 
 Quellen sind austauschbar (`scripts/lib/sources/`). Amtliche Adressen (z. B. Hauskoordinaten eines Bundeslands) werden als CSV mit einer JSON-Konfiguration eingebunden (Spalten, Koordinatensystem `EPSG:25832`/`25833` oder lat/lon, Lizenz, Quellenangabe):
 
 ```bash
 npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf \
-  --official hauskoordinaten.csv:scripts/sources.example.json --state Niedersachsen
+  --official hauskoordinaten.csv:scripts/sources/niedersachsen-hk.json --state Niedersachsen
 ```
+
+**Automatisch über GitHub:** Unter *Settings › Secrets and variables › Actions › Variables* die Variable `OFFICIAL_ADDR_URL` mit der Download-Adresse der CSV- oder ZIP-Datei anlegen. Optional zeigt `OFFICIAL_ADDR_CONFIG` auf eine eigene Spalten-Konfiguration (Standard: `scripts/sources/niedersachsen-hk.json`). Passt eine Spalte nicht, bricht der Build ab und nennt alle vorhandenen Spalten.
 
 Gleiche Adressen (gleiche Straße und Nummer, weniger als 150 m auseinander) werden zusammengeführt. Die Lage kommt aus der amtlichen Quelle (Reihenfolge mit `--prefer` änderbar). Lizenz und Quellenangabe jeder beteiligten Quelle stehen im Paket und werden in der App unter „Daten“ angezeigt.
 

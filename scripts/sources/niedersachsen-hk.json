@@ -1,6 +1,6 @@
 {
   "id": "lgln-hk",
-  "name": "Hauskoordinaten Niedersachsen (Beispiel-Konfiguration)",
+  "name": "Hauskoordinaten Niedersachsen (LGLN)",
   "license": "dl-de/by-2-0",
   "attribution": "© GeoBasis-DE / LGLN",
   "url": "https://www.lgln.niedersachsen.de",
@@ -15,5 +15,6 @@
     "city": "ort",
     "x": "ostwert",
     "y": "nordwert"
-  }
+  },
+  "_hinweis": "Spaltennamen an die heruntergeladene Datei anpassen. Fehlt eine Spalte, nennt der Build alle vorhandenen Spalten."
 }

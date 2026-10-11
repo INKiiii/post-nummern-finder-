@@ -513,6 +513,13 @@ export class MapView {
       };
       const targetNorm = target ? normHouseNumber(target.label) : '';
       const near: [HouseNumber, number, number][] = [];
+      // Gebäude ohne Hausnummer als kleine Quadrate
+      for (const [bl, bo] of focus.buildings ?? []) {
+        const [x, y] = toS(bl, bo);
+        if (!visible(x, y)) continue;
+        el('rect', { x: x - 5, y: y - 5, width: 10, height: 10, class: 'bld' }, gDots);
+        reserve(x - 6, y - 6, x + 6, y + 6);
+      }
       for (const n of focus.numbers) {
         const [x, y] = toS(n.lat, n.lon);
         if (!visible(x, y)) continue;

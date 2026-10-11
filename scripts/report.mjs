@@ -14,7 +14,7 @@ const { values } = parseArgs({
 });
 const packages = loadAllPackages(values.dir);
 const r = writeReport(packages, values.out);
-console.log(`${values.out}: ${r.streets} Straßen, davon ${r.gaps} ohne Hausnummern.`);
+console.log(`${values.out}: ${r.streets} Straßen, davon ${r.gaps} mit Häusern ohne Hausnummern, ${r.paths} Wege ohne Häuser.`);
 
 const all = [];
 const seen = new Set();

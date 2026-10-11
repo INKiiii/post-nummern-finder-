@@ -28,6 +28,12 @@ export const nearestStreets = L.nearestStreets as unknown as (
   maxM?: number,
   limit?: number,
 ) => { street: Street; dist: number }[];
+export const snapToBuilding = L.snapToBuilding as unknown as (
+  street: Street,
+  lat: number,
+  lon: number,
+  maxM?: number,
+) => [number, number] | null;
 export const distanceToStreet = L.distanceToStreet as unknown as (street: Street, lat: number, lon: number) => number | null;
 
 export const normStreet: (s: string) => string = N.normStreet;

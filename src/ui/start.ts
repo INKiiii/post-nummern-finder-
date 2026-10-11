@@ -140,7 +140,7 @@ export function startScreen(root: HTMLElement, params: { streetId?: string; list
 
   const streetInfo = (s: Street) => {
     if (s.user) return 'selbst angelegt';
-    if (!s.numbers.length) return 'keine Nummern';
+    if (!s.numbers.length) return s.buildings?.length ? `keine Nummern · ${s.buildings.length} Häuser` : 'Weg ohne Häuser';
     return `${s.numbers.length} Nr.`;
   };
 

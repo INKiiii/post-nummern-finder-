@@ -394,3 +394,4 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
 .warn-text { color: var(--accent); font-weight: 800; }
 .screen-start .banner { margin-top: 8px; }
 .loc-retry { margin-top: 10px; border-color: #fff; }
+.bld { fill: none; stroke: #8a8a8a; stroke-width: 2; }
