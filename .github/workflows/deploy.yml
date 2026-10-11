@@ -1,0 +1,62 @@
+# Baut die Regionspakete für Niedersachsen aus dem aktuellen OSM-Auszug (Geofabrik)
+# und veröffentlicht App + Pakete auf GitHub Pages.
+# Einmalig nötig: Repository-Einstellungen -> Pages -> Source: "GitHub Actions".
+name: Bauen und veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1' # wöchentlich Montag früh: Daten aktualisieren
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: OSM-Auszug Niedersachsen laden
+        run: |
+          mkdir -p data/osm
+          curl -fL --retry 3 -o data/osm/niedersachsen-latest.osm.pbf \
+            https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf
+      - name: Regionspakete bauen (alle PLZ in Niedersachsen)
+        run: npm run build-regions -- --input data/osm/niedersachsen-latest.osm.pbf --state Niedersachsen --details 21395,21436
+      - name: Stichprobentest
+        run: npm run sample-test
+      - name: App bauen
+        run: npm run build
+      - run: cp report.csv dist/report.csv
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report.csv
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,19 @@
+{
+  "id": "lgln-hk",
+  "name": "Hauskoordinaten Niedersachsen (Beispiel-Konfiguration)",
+  "license": "dl-de/by-2-0",
+  "attribution": "© GeoBasis-DE / LGLN",
+  "url": "https://www.lgln.niedersachsen.de",
+  "delimiter": ";",
+  "encoding": "utf8",
+  "crs": "EPSG:25832",
+  "columns": {
+    "street": "strasse",
+    "housenumber": "hausnummer",
+    "suffix": "zusatz",
+    "postcode": "plz",
+    "city": "ort",
+    "x": "ostwert",
+    "y": "nordwert"
+  }
+}
