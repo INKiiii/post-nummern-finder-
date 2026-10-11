@@ -5,6 +5,7 @@ import * as db from './db';
 import { loadHouseInfos } from './houseinfo';
 import { state, rebuildIndex } from './data';
 import { nameWarning } from './namecheck';
+import { loadPhotos, savePhoto, type HousePhoto } from './photos';
 import type { HouseInfo, UserPoint, UserStreet } from './types';
 
 export const USERDATA_FORMAT = 'hnf-userdata';
@@ -16,6 +17,7 @@ export interface UserDataFile {
   houseinfo: HouseInfo[];
   points: UserPoint[];
   streets: UserStreet[];
+  photos?: HousePhoto[];
 }
 
 export async function exportUserData(): Promise<UserDataFile> {
@@ -27,6 +29,7 @@ export async function exportUserData(): Promise<UserDataFile> {
     houseinfo: infos,
     points: state.points,
     streets: state.ustreets,
+    photos: [...(await loadPhotos()).values()],
   };
 }
 
@@ -74,7 +77,10 @@ function validate(data: any): UserDataFile & { namesRemoved: number } {
     h.updated = Number(h.updated) || 0;
   }
   for (const p of points) if (p.kind !== 'driveway') p.kind = 'number';
-  return { ...data, houseinfo, points, streets, namesRemoved };
+  const photos = arr(data.photos).filter(
+    (p: any) => typeof p?.key === 'string' && typeof p.dataUrl === 'string' && p.dataUrl.startsWith('data:image/') && p.dataUrl.length < 5e6,
+  ) as HousePhoto[];
+  return { ...data, houseinfo, points, streets, photos, namesRemoved };
 }
 
 export async function importUserData(json: string) {
@@ -89,10 +95,19 @@ export async function importUserData(json: string) {
   }
   for (const p of pts.result) await db.put('points', p);
   for (const s of sts.result) await db.put('ustreets', s);
+  const mine = await loadPhotos();
+  let photosAdded = 0;
+  for (const p of data.photos ?? []) {
+    const m = mine.get(p.key);
+    if (!m || (p.updated ?? 0) > (m.updated ?? 0)) {
+      await savePhoto(p.key, p.dataUrl, p.updated ?? Date.now());
+      photosAdded++;
+    }
+  }
   state.points = pts.result;
   state.ustreets = sts.result;
   rebuildIndex();
-  return { houseinfo: hi, points: pts, streets: sts, namesRemoved: data.namesRemoved };
+  return { houseinfo: hi, points: pts, streets: sts, photos: photosAdded, namesRemoved: data.namesRemoved };
 }
 
 const BACKUP_KEY = 'lastBackup';
@@ -133,7 +148,7 @@ export async function backupUserData(): Promise<boolean> {
 export async function backupState(now = Date.now()) {
   const last = await db.kvGet<number | null>(BACKUP_KEY, null);
   const infos = await loadHouseInfos();
-  const count = infos.size + state.points.length + state.ustreets.length;
+  const count = infos.size + state.points.length + state.ustreets.length + (await loadPhotos()).size;
   return { last, count, due: backupDue(last, now) };
 }
 

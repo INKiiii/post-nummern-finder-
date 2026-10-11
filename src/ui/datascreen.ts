@@ -89,7 +89,7 @@ export function dataScreen(root: HTMLElement) {
     try {
       const r = await importUserData(await f.text());
       toast(
-        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
+        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen, ${r.photos} Fotos${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
         5000,
       );
       void render();

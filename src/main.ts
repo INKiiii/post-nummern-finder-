@@ -7,6 +7,8 @@ import { dataScreen } from './ui/datascreen';
 import { newStreetScreen } from './ui/newstreet';
 import { autoUpdateRegions, loadAll, state } from './data';
 import { toast } from './ui/dom';
+import { unlockAudio } from './approach';
+import { loadPhotos } from './photos';
 import { loadRecents } from './recents';
 import { loadHouseInfos } from './houseinfo';
 import { gps } from './gps';
@@ -21,12 +23,14 @@ async function boot() {
   const root = document.getElementById('app')!;
   initApp(root);
   try {
-    await Promise.all([loadAll(), loadRecents(), loadHouseInfos()]);
+    await Promise.all([loadAll(), loadRecents(), loadHouseInfos(), loadPhotos()]);
   } catch (e) {
     root.textContent = 'Speicher (IndexedDB) nicht verfügbar: ' + (e as Error).message;
     return;
   }
   gps.start();
+  // Ton für Annäherungshinweise freischalten (iOS verlangt ein Tippen)
+  document.addEventListener('pointerdown', unlockAudio, { passive: true });
   history.replaceState({ name: 'start' }, '');
   if (!state.packages.length && !state.ustreets.length) {
     show('start', {}, false);

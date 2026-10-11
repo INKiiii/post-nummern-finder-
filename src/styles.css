@@ -417,3 +417,26 @@ h3 { font-size: 20px; margin: 18px 0 8px; color: var(--accent); }
 .screen-result .map-bar { padding: 4px 8px; }
 .screen-result .map-bar button { height: 44px; min-width: 50px; font-size: 24px; }
 .screen-result .map-bar button.mode { font-size: 17px; }
+
+/* Annäherung: großer Hinweis oben */
+.approach {
+  /* unten über den Knöpfen: Entfernung und Seite oben bleiben sichtbar */
+  position: fixed; left: 10px; right: 10px; bottom: calc(150px + env(safe-area-inset-bottom)); z-index: 150;
+  padding: 14px 16px; border-radius: 16px; background: var(--accent); color: #000;
+  font-size: 30px; font-weight: 900; text-align: center; box-shadow: 0 8px 30px #000c;
+}
+.approach.near { background: var(--ok); font-size: 34px; }
+.approach[hidden] { display: none; }
+.btn.sound { min-width: 52px; padding: 0 8px; font-size: 24px; }
+/* Foto vom Haus */
+.photo-strip { margin: 0 10px 4px; }
+.photo-strip[hidden] { display: none; }
+.photo-thumb { display: block; width: 100%; padding: 0; border: 3px solid var(--accent); border-radius: 12px; overflow: hidden; background: #000; }
+.photo-thumb img { display: block; width: 100%; height: 110px; object-fit: cover; }
+.photo-view { width: 100%; max-width: 640px; background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; border-radius: 16px 16px 0 0; }
+.photo-view img { width: 100%; max-height: 65vh; object-fit: contain; border-radius: 10px; background: #000; }
+/* Fußleiste: "Hier" + "Nächster Brief" */
+.bottombar.row { display: flex; gap: 8px; }
+.bottombar .here { flex: 0 0 28%; background: #0c2617; border-color: var(--ok); color: #fff; font-size: 21px; white-space: nowrap; padding: 0 6px; }
+.bottombar .primary { flex: 1; white-space: nowrap; padding: 0 8px; }
+.screen-result .bottombar .btn.huge { font-size: 23px; }

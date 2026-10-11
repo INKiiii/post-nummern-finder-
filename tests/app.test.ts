@@ -41,6 +41,11 @@ describe('Gesprochene Adressen', () => {
   ])('%s', (text, street, number) => {
     expect(parseSpokenAddress(text)).toEqual({ street, number });
   });
+  it('nur eine Nummer gesagt: Straße bleibt leer', () => {
+    expect(parseSpokenAddress('zweiundvierzig')).toEqual({ street: '', number: '42' });
+    expect(parseSpokenAddress('Nummer zwölf a')).toEqual({ street: '', number: '12a' });
+    expect(parseSpokenAddress('195')).toEqual({ street: '', number: '195' });
+  });
   it('liefert ohne Nummer nur die Straße', () => {
     expect(parseSpokenAddress('Schilfring')).toEqual({ street: 'Schilfring', number: null });
   });
@@ -184,5 +189,22 @@ describe('Datensicherung', () => {
     expect(backupDue(null, now)).toBe(true);
     expect(backupDue(now - 15 * day, now)).toBe(true);
     expect(backupDue(now - 13 * day, now)).toBe(false);
+  });
+});
+
+describe('Annäherungshinweis', () => {
+  it('löst bei 50 m einmal und bei 15 m einmal aus, nur beim Annähern', async () => {
+    const { ApproachAlert } = await import('../src/approach');
+    const a = new ApproachAlert();
+    expect(a.update(120, false)).toBeNull();
+    expect(a.update(80, false)).toBeNull();
+    expect(a.update(48, false)).toBe('far');
+    expect(a.update(40, false)).toBeNull();
+    expect(a.update(45, false)).toBeNull(); // entfernt sich
+    expect(a.update(14, false)).toBe('near');
+    expect(a.update(5, false)).toBeNull();
+    const b = new ApproachAlert();
+    b.update(60, true);
+    expect(b.update(40, true)).toBeNull(); // Ziel hinter einem
   });
 });

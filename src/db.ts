@@ -1,8 +1,8 @@
 // Kleine IndexedDB-Hülle. Alles bleibt lokal auf dem Gerät.
 
 const DB_NAME = 'hausnummern-finder';
-const DB_VERSION = 1;
-export type StoreName = 'packages' | 'houseinfo' | 'points' | 'ustreets' | 'kv';
+const DB_VERSION = 2;
+export type StoreName = 'packages' | 'houseinfo' | 'points' | 'ustreets' | 'kv' | 'photos';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -17,6 +17,8 @@ function open(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('points')) db.createObjectStore('points', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('ustreets')) db.createObjectStore('ustreets', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      // Version 2: Fotos pro Haus (Schlüssel wie Haus-Infos)
+      if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'key' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
