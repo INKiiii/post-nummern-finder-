@@ -181,6 +181,15 @@ describe('Straßenbezug und Fahrtrichtung', () => {
     const res = run(m, drive([[-310, -3], [-305, 2]], { speed: 1, seed: 5 }));
     expect(res[res.length - 1].street?.name).toBe('Blumenstraße');
   });
+
+  it('Korrektur gilt auch, wenn die gewählte Straße etwas weiter weg ist (bis 80 m)', () => {
+    const m = new StreetMatcher(() => index);
+    run(m, drive([[-280, -3], [-250, -3]], { speed: 1.2 }));
+    m.force(street('Blumenstraße'));
+    expect(m.current?.street?.name).toBe('Blumenstraße');
+    const res = run(m, drive([[-250, -3], [-240, -3]], { speed: 1.2, seed: 9 }));
+    expect(res[res.length - 1].street?.name).toBe('Blumenstraße');
+  });
 });
 
 describe('Ziel und Vorbeifahr-Warnung', () => {

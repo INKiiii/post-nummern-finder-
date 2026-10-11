@@ -10,6 +10,8 @@ import { autoUpdateRegions, loadAll, state } from './data';
 import { toast } from './ui/dom';
 import { unlockAudio } from './approach';
 import { loadRecents } from './recents';
+import { loadTour } from './tour';
+import { tourScreen } from './ui/tourscreen';
 import { loadHouseInfos } from './houseinfo';
 import { gps } from './gps';
 import { startSession } from './session';
@@ -18,6 +20,7 @@ import { applyTheme } from './settings';
 registerScreen('live', liveScreen as any);
 registerScreen('search', searchScreen as any);
 registerScreen('settings', settingsScreen as any);
+registerScreen('tour', tourScreen as any);
 registerScreen('regions', regionsScreen as any);
 registerScreen('data', dataScreen as any);
 registerScreen('newstreet', newStreetScreen as any);
@@ -27,7 +30,7 @@ async function boot() {
   const root = document.getElementById('app')!;
   initApp(root);
   try {
-    await Promise.all([loadAll(), loadRecents(), loadHouseInfos()]);
+    await Promise.all([loadAll(), loadRecents(), loadHouseInfos(), loadTour()]);
   } catch (e) {
     root.textContent = 'Speicher (IndexedDB) nicht verfügbar: ' + (e as Error).message;
     return;

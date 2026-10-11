@@ -11,6 +11,7 @@ import { locationDeniedBox } from './location';
 import { icon } from './icons';
 import { recentAddresses, recentStreets, remember } from '../recents';
 import { setTarget } from '../session';
+import { countUse } from '../tour';
 import { listenForAddress, speechSupported } from '../voice';
 import type { Street } from '../types';
 
@@ -70,6 +71,8 @@ export function searchScreen(root: HTMLElement, params: { streetId?: string; lis
   // Ziel setzen und zurück zur Live-Karte (Straße bleibt für den nächsten Brief gesetzt)
   const finish = (s: Street, nr: string) => {
     if (nr) void remember({ streetId: s.id, streetName: s.name, place: s.place, number: nr });
+    // Nur der Straßenname wird gezählt (Vorschlag „zur Tour hinzufügen“)
+    void countUse(s);
     setTarget({ streetId: s.id, number: nr });
     show('live', {}, false);
   };

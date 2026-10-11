@@ -179,7 +179,7 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .lt-row1 { display: flex; align-items: flex-start; gap: 8px; }
 .lt-name { flex: 1; min-width: 0; }
 .lt-street { font-size: 28px; font-weight: 900; line-height: 1.1; letter-spacing: -0.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lt-place { font-size: 14px; font-weight: 800; color: rgba(0, 0, 0, 0.65); min-height: 4px; }
+.lt-place { font-size: 14px; font-weight: 800; color: rgba(0, 0, 0, 0.7); min-height: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-gps {
   flex: none; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px;
   font-size: 14px; font-weight: 800; padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.1);
@@ -440,3 +440,19 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 
 /* Neue Straße */
 .bottombar { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--bg); }
+
+/* Live: Straßenname antippen = korrigieren */
+.lt-namebtn { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; padding: 0; }
+.menu-item.on { border-color: var(--yel); }
+
+/* Meine Tour */
+.tour-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.tour-row.missing { opacity: 0.6; }
+.tour-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tour-name b { font-size: 21px; }
+.tour-gaps { color: var(--muted); font-weight: 700; }
+.tour-gaps.has-gaps { color: var(--text); }
+.tour-btns, .tour-add { display: flex; gap: 6px; flex: none; }
+.sq-btn.small { width: 46px; height: 46px; border-radius: 12px; font-size: 16px; font-weight: 900; }
+.sq-btn.danger { color: var(--danger); }
+.tour-results { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }

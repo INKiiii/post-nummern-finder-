@@ -10,7 +10,7 @@ import { findHouse, drivewayFor, distanceToStreet, nearestStreets } from '../cor
 import { gps, type Fix } from '../gps';
 import { formatDistance } from '../guidance';
 import { MapView } from '../mapview';
-import { currentMatch, getTarget, matcher, onMatch, setTarget } from '../session';
+import { currentMatch, forceStreet, getTarget, matcher, onMatch, setTarget } from '../session';
 import { upcomingNumbers, targetInfo, type TargetInfo, type Upcoming } from '../preview';
 import { ApproachAlert, beep, soundEnabled, unlockAudio } from '../approach';
 import { passBeepEnabled } from '../settings';
@@ -19,6 +19,7 @@ import { locationDeniedBox } from './location';
 import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../houseinfo';
 import { openEditor } from './editor';
 import { hereMenu, longPressMenu } from './points';
+import { inTour, nextTourStreet, tourSuggestions } from '../tour';
 import type { Match } from '../matcher';
 import type { FindResult, Street } from '../types';
 
@@ -34,6 +35,7 @@ export function liveScreen(root: HTMLElement) {
   // ---------- Kopf: Straße + Vorschau je Seite ----------
   const streetEl = h('div', { class: 'lt-street' });
   const placeEl = h('div', { class: 'lt-place' });
+  const nameBtn = h('button', { class: 'lt-namebtn', 'aria-label': 'Straße korrigieren' }, streetEl, placeEl);
   const gpsEl = h('div', { class: 'lt-gps' });
   const leftEl = h('div', { class: 'lt-side lt-left' });
   const rightEl = h('div', { class: 'lt-side lt-right' });
@@ -42,7 +44,7 @@ export function liveScreen(root: HTMLElement) {
   const head = h(
     'header',
     { class: 'live-top' },
-    h('div', { class: 'lt-row1' }, h('div', { class: 'lt-name' }, streetEl, placeEl), gpsEl),
+    h('div', { class: 'lt-row1' }, h('div', { class: 'lt-name' }, nameBtn), gpsEl),
     h('div', { class: 'lt-preview' }, leftEl, rightEl),
     msgEl,
     deniedEl,
@@ -158,7 +160,10 @@ export function liveScreen(root: HTMLElement) {
       return;
     }
     streetEl.textContent = st.name;
-    placeEl.textContent = [st.place, st.plz].filter(Boolean).join(' · ');
+    // Tour: Teil und nächste Straße der heutigen Reihenfolge
+    const t = inTour(st);
+    const next = t ? nextTourStreet(state.index, st) : null;
+    placeEl.textContent = [st.place, t ? `Tour ${t.part}` : '', next ? `danach ${next.street.name}` : ''].filter(Boolean).join(' · ');
     const p = upcomingNumbers(matcher, m);
     if (!p) {
       leftEl.hidden = rightEl.hidden = true;
@@ -295,6 +300,7 @@ export function liveScreen(root: HTMLElement) {
     map.refresh();
   };
   menuBtn.addEventListener('click', () => openMenu());
+  nameBtn.addEventListener('click', () => chooseStreet(refresh));
   map.onLongPress = (lat, lon) => {
     const t = getTarget();
     const near = nearestStreets(state.index, lat, lon, 80, 1)[0]?.street ?? currentMatch()?.street ?? null;
@@ -320,11 +326,47 @@ function openMenu() {
     h(
       'div',
       { class: 'dialog menu' },
+      item('list', `Meine Tour${tourSuggestions(state.index).length ? ' (Vorschlag)' : ''}`, () => show('tour')),
       item('map', 'Gebiete laden / aktualisieren', () => show('regions')),
       item('data', 'Eigene Daten & Sicherung', () => show('data')),
       item('road', 'Fehlende Straße anlegen', () => show('newstreet', {})),
       item('gear', 'Einstellungen & Info', () => show('settings')),
       h('button', { class: 'btn big', onClick: () => close() }, 'Schließen'),
+    ),
+  );
+}
+
+/** Falsch erkannte Straße korrigieren: nahe Straßen zur Auswahl (Tour-Straßen zuerst). */
+function chooseStreet(onDone: () => void) {
+  const fix = gps.fix;
+  if (!fix) return;
+  const near = nearestStreets(state.index, fix.lat, fix.lon, 80, 6).sort(
+    (a, b) => Number(!!inTour(b.street)) - Number(!!inTour(a.street)) || a.dist - b.dist,
+  );
+  const cur = currentMatch()?.street?.id;
+  const close = overlay(
+    h(
+      'div',
+      { class: 'dialog' },
+      h('h2', null, 'Welche Straße ist es?'),
+      ...(near.length
+        ? near.map(({ street, dist }) =>
+            h(
+              'button',
+              {
+                class: 'menu-item' + (street.id === cur ? ' on' : ''),
+                onClick: () => {
+                  close();
+                  forceStreet(street);
+                  onDone();
+                },
+              },
+              h('span', null, h('b', null, street.name), h('span', { class: 'muted small' }, ` ${street.place} · ${Math.round(dist)} m${inTour(street) ? ' · Tour' : ''}`)),
+            ),
+          )
+        : [h('p', { class: 'muted' }, 'Keine Straße in der Nähe.')]),
+      h('p', { class: 'hint' }, 'Gilt, solange du in der Nähe dieser Straße bleibst.'),
+      h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
   );
 }

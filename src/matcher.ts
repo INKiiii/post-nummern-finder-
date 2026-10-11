@@ -202,7 +202,7 @@ export class StreetMatcher {
 
     // Kandidaten in der Nähe
     const maxD = Math.max(25, Math.min(60, acc * 1.5));
-    const pad = (maxD + 10) / 111320;
+    const pad = (Math.max(maxD, this.forcedId ? 80 : 0) + 10) / 111320;
     const padLon = pad / Math.cos((fix.lat * Math.PI) / 180);
     type Cand = NonNullable<ReturnType<StreetMatcher['candidate']>> & { score: number };
     const cands: Cand[] = [];
@@ -211,7 +211,8 @@ export class StreetMatcher {
       if (!b || !st.lines.length) continue;
       if (fix.lat < b[0] - pad || fix.lat > b[2] + pad || fix.lon < b[1] - padLon || fix.lon > b[3] + padLon) continue;
       const c = this.candidate(st, xy);
-      if (!c || c.dist > maxD) continue;
+      // Von Hand gewählte Straße gilt bis 80 m Abstand
+      if (!c || c.dist > (st.id === this.forcedId ? Math.max(80, maxD) : maxD)) continue;
       let score = c.dist;
       if (this.preferred.size && !this.preferred.has(st.id)) score += 8;
       if (reliableCourse !== null) {
@@ -219,7 +220,8 @@ export class StreetMatcher {
         score += 12 * Math.abs(Math.sin((angleDiff(reliableCourse, tb) * Math.PI) / 180));
       }
       if (this.cur?.street && st.id === this.cur.street.id) score -= 6;
-      if (st.id === this.forcedId) score -= 40;
+      // Von Hand gewählt: gilt, solange sie in Reichweite ist
+      if (st.id === this.forcedId) score -= 1000;
       cands.push({ ...c, score });
     }
     if (this.forcedId && !cands.some((c) => c.street.id === this.forcedId)) this.forcedId = null;

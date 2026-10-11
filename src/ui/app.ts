@@ -1,6 +1,6 @@
 // Bildschirm-Navigation. Jeder Bildschirm liefert eine Aufräumfunktion.
 
-export type ScreenName = 'live' | 'search' | 'regions' | 'data' | 'newstreet' | 'settings';
+export type ScreenName = 'live' | 'search' | 'regions' | 'data' | 'newstreet' | 'settings' | 'tour';
 export type Params = Record<string, any>;
 type Screen = (root: HTMLElement, params: Params) => (() => void) | void;
 
