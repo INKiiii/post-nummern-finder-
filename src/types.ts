@@ -25,6 +25,8 @@ export interface Street {
   numbers: HouseNumber[];
   /** Wohngebäude ohne Hausnummer an dieser Straße */
   buildings: [number, number][];
+  /** Gebäudeumrisse (dünn auf der Karte), falls im Paket enthalten */
+  outlines: [number, number][][];
   driveways: { norms: string[]; line: [number, number][]; user: boolean; pointId?: string }[];
   q: { min: number | null; max: number | null; missing: number[]; count: number; ratio: number; gap: boolean } | null;
   regions: Set<string>;

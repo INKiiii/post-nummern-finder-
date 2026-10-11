@@ -38,8 +38,13 @@ function serviceWorker(): Plugin {
   };
 }
 
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const sha = (process.env.GITHUB_SHA ?? '').slice(0, 7);
+const APP_VERSION = `${pkg.version} (${new Date().toISOString().slice(0, 10)}${sha ? ' · ' + sha : ''})`;
+
 export default defineConfig({
   base: './',
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   plugins: [serviceWorker()],
   build: { target: 'es2022', sourcemap: false },
   test: { environment: 'node', include: ['tests/**/*.test.{ts,js,mjs}'] },

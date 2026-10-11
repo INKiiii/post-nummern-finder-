@@ -5,10 +5,37 @@ import { show } from './app';
 import { state, deletePoint, deleteUserStreet } from '../data';
 import { backupState, backupUserData, importUserData } from '../exportimport';
 import { loadHouseInfos } from '../houseinfo';
+import { countOldPhotos, deleteOldPhotos } from '../photos';
 
 export function dataScreen(root: HTMLElement) {
   const counts = h('p', { class: 'big-text' });
   const lists = h('div');
+
+  const oldPhotos = h('div');
+  const renderPhotos = async () => {
+    const n = await countOldPhotos();
+    oldPhotos.replaceChildren(
+      ...(n
+        ? [
+            h('p', { class: 'warn' }, `${n} ${n === 1 ? 'Foto' : 'Fotos'} aus einer älteren Version gespeichert. Die App speichert keine Fotos mehr.`),
+            h(
+              'button',
+              {
+                class: 'btn big danger',
+                onClick: async () => {
+                  if (await confirmBig(`${n} alte ${n === 1 ? 'Foto' : 'Fotos'} endgültig löschen?`, 'Löschen')) {
+                    await deleteOldPhotos();
+                    toast('Fotos gelöscht.');
+                    void renderPhotos();
+                  }
+                },
+              },
+              'Alte Fotos löschen',
+            ),
+          ]
+        : []),
+    );
+  };
 
   const render = async () => {
     const infos = await loadHouseInfos();
@@ -89,7 +116,7 @@ export function dataScreen(root: HTMLElement) {
     try {
       const r = await importUserData(await f.text());
       toast(
-        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen, ${r.photos} Fotos${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
+        `Importiert: ${r.houseinfo.added + r.houseinfo.updated} Haus-Infos, ${r.points.added + r.points.updated} Punkte/Einfahrten, ${r.streets.added + r.streets.updated} Straßen${r.namesRemoved ? `, ${r.namesRemoved} Hinweise mit Namen verworfen` : ''}.`,
         5000,
       );
       void render();
@@ -103,7 +130,7 @@ export function dataScreen(root: HTMLElement) {
     h(
       'header',
       { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('start', {}, false) }, '‹ Zurück'),
+      h('button', { class: 'btn', onClick: () => show('live', {}, false) }, '‹ Zurück'),
       h('div', { class: 'title' }, 'Eigene Daten'),
     ),
     h(
@@ -116,12 +143,14 @@ export function dataScreen(root: HTMLElement) {
         h('button', { class: 'btn big', onClick: () => fileInput.click() }, '⇩ Importieren'),
       ),
       backupInfo,
+      oldPhotos,
       fileInput,
       lists,
     ),
   );
   void render();
   void renderBackup();
+  void renderPhotos();
 }
 
 function sourcesList() {

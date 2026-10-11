@@ -7,6 +7,8 @@ export interface Fix {
   lon: number;
   accuracy: number;
   heading: number | null;
+  /** Kurs direkt vom GPS (nur bei Fahrt sinnvoll), sonst null */
+  course: number | null;
   speed: number | null;
   time: number;
 }
@@ -77,7 +79,8 @@ class Gps {
         this.anchor = { lat, lon };
       }
     }
-    this.fix = { lat, lon, accuracy, heading: this.heading, speed, time: p.timestamp };
+    const course = heading !== null && Number.isFinite(heading) ? heading : null;
+    this.fix = { lat, lon, accuracy, heading: this.heading, course, speed, time: p.timestamp };
     this.emit();
   }
 

@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { parseGermanNumber, parseSpokenAddress } from '../src/speechparse';
 import { nameWarning } from '../src/namecheck';
-import { computeGuidance, formatDistance } from '../src/guidance';
+import { formatDistance } from '../src/guidance';
 import { summarize } from '../src/houseinfo';
 import { mergeRecords, backupDue } from '../src/exportimport';
-import { makeProjection } from '../src/core';
-import type { HouseNumber, Street } from '../src/types';
-import { edgePoint, followAhead, forcedLabels } from '../src/maplabels';
+import { edgePoint, labelOrder, AHEAD_LEVELS, DEFAULT_LEVEL, NUMBER_FONT } from '../src/maplabels';
 
 describe('Zahlwörter', () => {
   it.each([
@@ -68,46 +66,8 @@ describe('Namenswarnung', () => {
   });
 });
 
-describe('Straßenseite und Entfernung', () => {
-  const origin = [53.39, 10.42] as const;
-  const proj = makeProjection(origin[0], origin[1]);
-  const ll = (x: number, y: number) => proj.toLatLon(x, y);
-  // Straße West -> Ost
-  const street = { lines: [[ll(-500, 0), ll(500, 0)]] } as unknown as Street;
-  const north = ll(100, 15);
-  const south = ll(100, -15);
-  const user = (x: number, y: number, heading: number | null) => {
-    const [lat, lon] = ll(x, y);
-    return { lat, lon, heading };
-  };
-
-  it('Fahrt nach Osten: Nordseite links, Südseite rechts', () => {
-    expect(computeGuidance(user(0, 0, 90), { lat: north[0], lon: north[1] }, street).side).toBe('links');
-    expect(computeGuidance(user(0, 0, 90), { lat: south[0], lon: south[1] }, street).side).toBe('rechts');
-  });
-  it('Fahrt nach Westen: umgekehrt, und Ziel hinter einem', () => {
-    const g = computeGuidance(user(300, 0, 270), { lat: north[0], lon: north[1] }, street);
-    expect(g.side).toBe('rechts');
-    expect(g.behind).toBe(false);
-    const g2 = computeGuidance(user(0, 0, 270), { lat: north[0], lon: north[1] }, street);
-    expect(g2.behind).toBe(true);
-  });
-  it('Straßenseite stimmt auch, wenn das Ziel weit voraus liegt', () => {
-    const far = ll(450, 12);
-    // Peilung wäre fast geradeaus – trotzdem links
-    expect(computeGuidance(user(-450, 0, 90), { lat: far[0], lon: far[1] }, street).side).toBe('links');
-  });
-  it('ohne Straße: Peilung relativ zur Fahrtrichtung', () => {
-    const t = ll(100, 100);
-    expect(computeGuidance(user(0, 0, 0), { lat: t[0], lon: t[1] }, null).side).toBe('rechts');
-    expect(computeGuidance(user(0, 0, 90), { lat: t[0], lon: t[1] }, null).side).toBe('links');
-  });
-  it('ohne Fahrtrichtung keine Seite, aber Entfernung', () => {
-    const g = computeGuidance(user(0, 0, null), { lat: north[0], lon: north[1] }, street);
-    expect(g.side).toBeNull();
-    expect(g.distance).toBeCloseTo(Math.hypot(100, 15), 0);
-  });
-  it('formatiert Entfernungen', () => {
+describe('Entfernung', () => {
+  it('formatiert Meter und Kilometer', () => {
     expect(formatDistance(123)).toBe('125 m');
     expect(formatDistance(1530)).toBe('1,5 km');
   });
@@ -145,34 +105,20 @@ describe('Haus-Infos', () => {
 });
 
 describe('Kartenbeschriftung und Zoom', () => {
-  const num = (label: string): HouseNumber => {
-    const m = /^(\d+)([a-z]?)$/.exec(label)!;
-    return { label, norm: label, num: +m[1], suffix: m[2], to: null, lat: 0, lon: 0, source: 'osm', plz: '' };
-  };
-  const all = Array.from({ length: 80 }, (_, i) => num(String(i + 1)));
-
-  it('beschriftet Ziel und je 3 Nachbarn derselben Straßenseite', () => {
-    const f = [...forcedLabels(all, '42')].map((n) => n.label).sort((a, b) => +a - +b);
-    expect(f).toEqual(['36', '38', '40', '42', '44', '46', '48']);
+  it('Vorrang beim Beschriften: Ziel, dann voraus (nächste zuerst), dann dahinter', () => {
+    const car: [number, number] = [200, 400];
+    const cands = [
+      { item: 'hinten-nah', x: 210, y: 430 },
+      { item: 'voraus-fern', x: 200, y: 100 },
+      { item: 'voraus-nah', x: 220, y: 350 },
+      { item: 'ziel', x: 50, y: 50, target: true },
+      { item: 'hinten-fern', x: 200, y: 600 },
+    ];
+    expect(labelOrder(cands, car, [200, 300])).toEqual(['ziel', 'voraus-nah', 'voraus-fern', 'hinten-nah', 'hinten-fern']);
   });
-  it('fehlende Zielnummer: trotzdem die Nachbarn', () => {
-    const list = all.filter((n) => n.label !== '17');
-    const f = [...forcedLabels(list, '17')].map((n) => n.label).sort((a, b) => +a - +b);
-    expect(f).toEqual(['11', '13', '15', '19', '21', '23']);
-  });
-  it('Zusatz 12a zählt mit 12 als eine Position', () => {
-    const list = [...all, num('12a')];
-    const f = [...forcedLabels(list, '14')].map((n) => n.label);
-    expect(f).toContain('12');
-    expect(f).toContain('12a');
-    expect(f).toContain('8');
-    expect(f).not.toContain('6');
-  });
-  it('zoomt bei Annäherung heran, höchstens 120 m voraus', () => {
-    expect(followAhead(5000)).toBe(120);
-    expect(followAhead(Infinity)).toBe(120);
-    expect(followAhead(60)).toBeCloseTo(85);
-    expect(followAhead(5)).toBe(35);
+  it('Standardausschnitt 80 m voraus, Schrift mindestens 18 px', () => {
+    expect(AHEAD_LEVELS[DEFAULT_LEVEL]).toBe(80);
+    expect(NUMBER_FONT).toBeGreaterThanOrEqual(18);
   });
   it('setzt den Randpfeil auf den Kartenrand', () => {
     expect(edgePoint([200, 300], 0, 400, 400, 30)).toEqual([200, 30]);

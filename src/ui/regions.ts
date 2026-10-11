@@ -143,7 +143,7 @@ export function regionsScreen(root: HTMLElement) {
     h(
       'header',
       { class: 'topbar' },
-      h('button', { class: 'btn', onClick: () => show('start', {}, false) }, '‹ Zurück'),
+      h('button', { class: 'btn', onClick: () => show('live', {}, false) }, '‹ Zurück'),
       h('div', { class: 'title' }, 'Gebiete'),
     ),
     h('div', { class: 'page' },

@@ -1,47 +1,37 @@
-// Regeln für Zoom und Beschriftung der Karte (ohne DOM, damit testbar).
+// Regeln für Ausschnitt und Beschriftung der Karte (ohne DOM, damit testbar).
 
-import { parseHouseNumber } from './core';
-import type { HouseNumber } from './types';
+/** Sicht voraus in Metern je Zoomstufe (Live-Karte). Standard: 80 m voraus, ~20 m zurück. */
+export const AHEAD_LEVELS = [30, 45, 60, 80, 110, 150, 220, 320, 500];
+export const DEFAULT_LEVEL = 3;
+/** Anteil der Kartenhöhe über dem Fahrzeug (Fahrzeug im unteren Drittel bzw. Viertel). */
+export const CAR_Y = 0.75;
+/** Mindestschriftgröße der Hausnummern auf der Karte (px). */
+export const NUMBER_FONT = 20;
 
-/** Maximale Sicht voraus (m) und Abstand, ab dem alle Nummern beschriftet werden. */
-export const AHEAD_MAX = 120;
-export const AHEAD_MIN = 35;
-export const LABEL_NEAR_CAR = 40;
-
-/**
- * Wie weit die Karte vor dem Auto zeigt: höchstens 120 m, beim Annähern enger.
- * Bei 30 m Restweg etwa 50 m Sicht, bei 10 m etwa 35 m.
- */
-export function followAhead(distanceToTarget: number): number {
-  if (!Number.isFinite(distanceToTarget)) return AHEAD_MAX;
-  return Math.max(AHEAD_MIN, Math.min(AHEAD_MAX, distanceToTarget * 1.25 + 10));
+export interface LabelCandidate<T> {
+  item: T;
+  x: number;
+  y: number;
+  target?: boolean;
 }
 
 /**
- * Hausnummern, die immer beschriftet werden: die Zielnummer und je 3 Nachbarn davor und
- * dahinter auf derselben Straßenseite (gerade/ungerade). Gibt es auf dieser Seite keine,
- * werden die nächsten Nummern beider Seiten genommen.
+ * Reihenfolge, in der Hausnummern beschriftet werden (bei Platzmangel fallen die hinteren weg):
+ * Zielnummer, dann Häuser voraus (über dem Fahrzeug, nächste zuerst), dann Häuser dahinter.
+ * Ohne Fahrzeug: vom Kartenmittelpunkt aus, nächste zuerst.
  */
-export function forcedLabels(numbers: HouseNumber[], targetLabel: string, perSide = 3): Set<HouseNumber> {
-  const out = new Set<HouseNumber>();
-  const t = parseHouseNumber(targetLabel);
-  if (t.num === null) return out;
-  for (const n of numbers) if (n.norm === t.norm) out.add(n);
-  const numeric = numbers.filter((n) => n.num !== null && n.norm !== t.norm);
-  const same = numeric.filter((n) => n.num! % 2 === t.num! % 2);
-  const pool = same.length ? same : numeric;
-  // Je Hausnummer nur einen Eintrag zählen (12 und 12a gelten als eine Position)
-  const pick = (list: HouseNumber[]) => {
-    const seen = new Set<number>();
-    for (const n of list) {
-      if (!seen.has(n.num!) && seen.size >= perSide) break;
-      seen.add(n.num!);
-      out.add(n);
-    }
+export function labelOrder<T>(cands: LabelCandidate<T>[], car: [number, number] | null, center: [number, number]): T[] {
+  const ref = car ?? center;
+  const key = (c: LabelCandidate<T>) => {
+    if (c.target) return -1;
+    const d = Math.hypot(c.x - ref[0], c.y - ref[1]);
+    if (!car) return d;
+    return c.y <= car[1] + 4 ? d : 1e6 + d;
   };
-  pick(pool.filter((n) => n.num! < t.num! || (n.num === t.num && n.suffix < t.suffix)).sort((a, b) => b.num! - a.num!));
-  pick(pool.filter((n) => n.num! > t.num! || (n.num === t.num && n.suffix > t.suffix)).sort((a, b) => a.num! - b.num!));
-  return out;
+  return cands
+    .map((c) => ({ c, k: key(c) }))
+    .sort((a, b) => a.k - b.k)
+    .map((e) => e.c.item);
 }
 
 /**
