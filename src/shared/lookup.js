@@ -35,6 +35,51 @@ export function encodeLine(pts) {
   return out;
 }
 
+/**
+ * Gebäudeumrisse: je Umriss [dLat, dLon, ...] in 1e-5 Grad. Der erste Punkt ist relativ zum
+ * ersten Punkt des vorigen Umrisses, die übrigen relativ zum vorigen Punkt.
+ * @param {ArrayLike<number>[]} polys absolute Ganzzahlen [lat, lon, ...] (1e-5 Grad)
+ */
+export function encodeOutlines(polys) {
+  const sorted = [...polys].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let plat = 0;
+  let plon = 0;
+  return sorted.map((p) => {
+    const out = [];
+    let la = plat;
+    let lo = plon;
+    for (let i = 0; i < p.length; i += 2) {
+      out.push(p[i] - la, p[i + 1] - lo);
+      la = p[i];
+      lo = p[i + 1];
+    }
+    plat = p[0];
+    plon = p[1];
+    return out;
+  });
+}
+
+/** @returns {number[][][]} Umrisse als [[lat, lon], ...] */
+export function decodeOutlines(enc) {
+  let plat = 0;
+  let plon = 0;
+  return enc.map((d) => {
+    const pts = [];
+    let la = plat;
+    let lo = plon;
+    for (let i = 0; i < d.length; i += 2) {
+      la += d[i];
+      lo += d[i + 1];
+      if (i === 0) {
+        plat = la;
+        plon = lo;
+      }
+      pts.push([la / 1e5, lo / 1e5]);
+    }
+    return pts;
+  });
+}
+
 function makeNumber(label, lat, lon, extra = {}) {
   const p = parseHouseNumber(label);
   return { label: p.label, norm: p.norm, num: p.num, suffix: p.suffix, to: p.to, lat, lon, ...extra };
@@ -61,6 +106,7 @@ export function decodeStreet(s, pkg) {
     plz: s.z ?? pkg?.plz ?? '',
     driveways,
     buildings: s.b ? decodeLine(s.b) : [],
+    outlines: s.o ? decodeOutlines(s.o) : [],
     norm: normStreet(s.n),
     fold: foldText(s.n),
     lines,
@@ -138,6 +184,7 @@ export function addUserStreet(index, us) {
     numbers,
     driveways: [],
     buildings: [],
+    outlines: [],
     q: null,
     regions: new Set(),
     user: true,

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { normStreet } from '../../src/shared/normalize.js';
 import { normHouseNumber, splitHouseNumbers, completeness, compareHouseNumbers } from '../../src/shared/housenumber.js';
 import { makeProjection, distanceM } from '../../src/shared/geo.js';
-import { encodeLine, PACKAGE_FORMAT, PACKAGE_VERSION } from '../../src/shared/lookup.js';
+import { encodeLine, encodeOutlines, PACKAGE_FORMAT, PACKAGE_VERSION } from '../../src/shared/lookup.js';
 import { AreaIndex, PointGrid, SegmentGrid } from './polygons.mjs';
 
 const PLZ_RE = /^\d{5}$/;
@@ -472,6 +472,32 @@ export function attachBuildings(streets, buildings) {
   return n;
 }
 
+/**
+ * Ordnet Gebäudeumrisse (Int32Array, 1e-5 Grad) der nächsten Straße zu (bis maxM Meter,
+ * gemessen ab dem Mittelpunkt des Umrisses). Weiter entfernte Gebäude entfallen.
+ * @returns {number} Anzahl zugeordneter Umrisse
+ */
+export function attachOutlines(streets, outlines, maxM = 90) {
+  if (!outlines?.length) return 0;
+  const roads = new SegmentGrid();
+  for (const st of streets) for (const l of st.lines) roads.addLine(l, st);
+  let n = 0;
+  for (const o of outlines) {
+    let la = 0;
+    let lo = 0;
+    for (let i = 0; i < o.length; i += 2) {
+      la += o[i];
+      lo += o[i + 1];
+    }
+    const k = o.length / 2;
+    const near = roads.nearest(la / k / 1e5, lo / k / 1e5, maxM);
+    if (!near) continue;
+    (near.item.outlines ??= []).push(o);
+    n++;
+  }
+  return n;
+}
+
 function streetMid(st) {
   const longest = st.lines.reduce((a, l) => (l.length > (a?.length ?? 0) ? l : a), null);
   if (longest) return longest[Math.floor(longest.length / 2)];
@@ -654,6 +680,7 @@ export function makePackage(region, sourcesMeta, built) {
       if (st.isPlace) s.t = 'place';
       if (st.driveways?.length) s.d = st.driveways.map((d) => [d.labels, encodeLine(d.line)]);
       if (st.buildings?.length) s.b = encodeLine(st.buildings);
+      if (st.outlines?.length) s.o = encodeOutlines(st.outlines);
       return s;
     });
   return {
@@ -671,9 +698,27 @@ export function makePackage(region, sourcesMeta, built) {
   };
 }
 
-export function writePackage(pkg, outDir) {
-  const json = JSON.stringify(pkg);
-  const gz = zlib.gzipSync(json, { level: 9 });
+/**
+ * Schreibt ein Paket. Gebäudeumrisse (Feld "o") bleiben nur drin, wenn das Paket dadurch
+ * höchstens um den Faktor maxOutlineRatio wächst; sonst werden sie weggelassen.
+ */
+export function writePackage(pkg, outDir, maxOutlineRatio = 2) {
+  const hasOutlines = pkg.streets.some((s) => s.o);
+  let json = JSON.stringify(pkg);
+  let gz = zlib.gzipSync(json, { level: 9 });
+  let sizeWithout = gz.length;
+  let outlinesDropped = false;
+  if (hasOutlines) {
+    const plain = JSON.stringify(pkg, (k, v) => (k === 'o' ? undefined : v));
+    const gzPlain = zlib.gzipSync(plain, { level: 9 });
+    sizeWithout = gzPlain.length;
+    if (gz.length > gzPlain.length * maxOutlineRatio) {
+      for (const s of pkg.streets) delete s.o;
+      json = plain;
+      gz = gzPlain;
+      outlinesDropped = true;
+    }
+  }
   const file = `${pkg.id}.json.gz`;
   fs.writeFileSync(path.join(outDir, file), gz);
   // Hash nur über den Inhalt (ohne Bauzeit), damit "Aktualisieren" nur echte Änderungen meldet.
@@ -682,5 +727,5 @@ export function writePackage(pkg, outDir) {
     .update(JSON.stringify([pkg.name, pkg.sources.map((s) => s.id), pkg.streets]))
     .digest('hex')
     .slice(0, 12);
-  return { file, size: gz.length, rawSize: json.length, hash };
+  return { file, size: gz.length, rawSize: json.length, hash, sizeWithout, hasOutlines: hasOutlines && !outlinesDropped, outlinesDropped };
 }
