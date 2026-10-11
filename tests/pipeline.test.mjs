@@ -228,5 +228,17 @@ describe('Suche und Lage (App-Logik)', () => {
     const e = pkgs[0].streets.find((s) => s.n === 'Elbuferstraße');
     expect(e.q.bu).toBe(11);
   });
+
+  it('eigener Punkt korrigiert eine falsch eingetragene Nummer', () => {
+    const idx0 = buildIndex(pkgs);
+    const e0 = searchStreets(idx0, 'Elbuferstraße')[0];
+    const [lat, lon] = town.proj.toLatLon(-500, 30);
+    const idx = buildIndex(pkgs, {
+      points: [{ id: 'k1', kind: 'number', streetId: e0.id, streetName: 'Elbuferstraße', number: '42', lat, lon, updated: 1, created: 1 }],
+    });
+    const r = findHouse(idx.streets.get(e0.id), '42');
+    expect(r.match.user).toBe(true);
+    expect(r.lat).toBeCloseTo(lat, 9);
+  });
 });
 

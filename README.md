@@ -78,6 +78,8 @@ Auf dem Handy die Pages-Adresse öffnen und „Zum Startbildschirm hinzufügen�
 * **Sprechen:** Mikrofon antippen und „Elbuferstraße zweiundvierzig“ sagen, das Ergebnis erscheint ohne Bestätigung. „Nächster Brief“ hört direkt wieder zu. Die Spracherkennung braucht je nach Browser Internet; die Tastatur geht immer offline.
 * **Lücken schließen:** Lang auf die Karte drücken setzt eine Hausnummer („selbst gesetzt“). Fehlende Straßen legt man über die Suche an: nachzeichnen, beim Fahren aufzeichnen oder nur mit Startpunkt.
 * **Sichern und Teilen:** „Haus-Infos sichern“ (unter „Daten“) speichert Haus-Infos, eigene Punkte, Einfahrten und Straßen als JSON-Datei (Teilen-Menü oder Download). Ist die letzte Sicherung älter als 14 Tage oder gab es noch keine, erinnert der Startscreen daran (nur wenn eigene Daten vorhanden sind). Import unter „Daten“; bei Konflikten gewinnt der neuere Stand.
+* **Updates:** Neue App-Versionen holt die App beim nächsten Neustart (bei der Homebildschirm-App: ganz schließen und neu öffnen). Neue Kartendaten (wöchentlicher Build) lädt sie beim Start mit Internet automatisch nach; eigene Punkte und Haus-Infos bleiben erhalten.
+* **Eigene Punkte haben Vorrang:** Ist eine Nummer in den Daten falsch verortet, gilt nach dem Setzen die eigene Lage.
 * Speicherung nur lokal (IndexedDB). Der Service Worker hält die App offline bereit.
 
 ## Qualitätsbericht und Stichprobentest (Schritt 5)

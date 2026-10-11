@@ -241,7 +241,9 @@ export function bestStreetMatch(index, spoken) {
 export function findHouse(street, input) {
   const p = parseHouseNumber(input);
   const nums = street.numbers;
-  const exact = nums.find((n) => n.norm === p.norm) ?? nums.find((n) => n.num === p.num && n.suffix === p.suffix && p.num !== null);
+  // Eigene Punkte haben Vorrang (z. B. Korrektur einer falsch eingetragenen Nummer)
+  const same = (n) => n.norm === p.norm || (p.num !== null && n.num === p.num && n.suffix === p.suffix);
+  const exact = nums.find((n) => n.user && same(n)) ?? nums.find((n) => n.norm === p.norm) ?? nums.find(same);
   if (exact) {
     // Nummern aus OSM-Interpolationslinien sind nur ungefähr verortet
     const approx = exact.source === 'osm-interp';
