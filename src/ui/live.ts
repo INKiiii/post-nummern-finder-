@@ -20,6 +20,7 @@ import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../h
 import { openEditor } from './editor';
 import { hereMenu, longPressMenu } from './points';
 import { inTour, nextTourStreet, tourSuggestions } from '../tour';
+import { onStatusChange, statusSummary, type StatusSummary } from '../status';
 import type { Match } from '../matcher';
 import type { FindResult, Street } from '../types';
 
@@ -70,7 +71,14 @@ export function liveScreen(root: HTMLElement) {
   const zoomOut = h('button', { class: 'sq-btn', 'aria-label': 'Weiter weg' }, icon('minus', 26));
   const zoomIn = h('button', { class: 'sq-btn', 'aria-label': 'Näher heran' }, icon('plus', 26));
   const recenterBtn = h('button', { class: 'sq-btn accent', 'aria-label': 'Zurück zur Position' }, icon('locate', 26));
-  const menuBtn = h('button', { class: 'sq-btn', 'aria-label': 'Menü' }, icon('menu', 26));
+  const menuBadge = h('span', { class: 'badge-attn', 'aria-hidden': 'true' }, '!');
+  const menuBtn = h('button', { class: 'sq-btn menu-btn', 'aria-label': 'Menü' }, icon('menu', 26), menuBadge);
+  menuBadge.hidden = true;
+  const renderBadge = async () => {
+    const st = await statusSummary();
+    menuBadge.hidden = !st.attention;
+    menuBtn.setAttribute('aria-label', st.attention ? 'Menü (Hinweis)' : 'Menü');
+  };
   const bar = h('footer', { class: 'live-bar' }, searchBtn, hereBtn, menuBtn);
   map.controls.append(zoomIn, zoomOut, recenterBtn);
   recenterBtn.hidden = true;
@@ -314,26 +322,49 @@ export function liveScreen(root: HTMLElement) {
   }
 
   renderAll(currentMatch(), gps.fix);
+  void renderBadge();
+  const unsubStatus = onStatusChange(() => void renderBadge());
   const unsub = onMatch((m, fix) => renderAll(m, fix));
-  return () => unsub();
+  return () => {
+    unsub();
+    unsubStatus();
+  };
 }
 
-/** Menü: selten Gebrauchtes, nur im Stand. */
+/** Menü: selten Gebrauchtes, nur im Stand. Oben der ehrliche Status. */
 function openMenu() {
-  const item = (ic: IconName, label: string, fn: () => void) =>
-    h('button', { class: 'menu-item', onClick: () => (close(), fn()) }, icon(ic, 26), h('span', null, label));
+  const item = (ic: IconName, label: string, fn: () => void, note = '') =>
+    h('button', { class: 'menu-item', onClick: () => (close(), fn()) }, icon(ic, 26), h('span', null, label, note ? h('small', { class: 'menu-note' }, note) : null));
+  const statusEl = h('div', { class: 'status-list' });
+  const tourItem = item('list', 'Meine Tour', () => show('tour'), tourSuggestions(state.index).length ? 'Vorschlag: oft genutzte Straße' : '');
+  const dataItem = item('data', 'Eigene Daten & Sicherung', () => show('data'));
+  const regionsItem = item('map', 'Gebiete laden / aktualisieren', () => show('regions'));
   const close = overlay(
     h(
       'div',
       { class: 'dialog menu' },
-      item('list', `Meine Tour${tourSuggestions(state.index).length ? ' (Vorschlag)' : ''}`, () => show('tour')),
-      item('map', 'Gebiete laden / aktualisieren', () => show('regions')),
-      item('data', 'Eigene Daten & Sicherung', () => show('data')),
+      statusEl,
+      tourItem,
+      regionsItem,
+      dataItem,
       item('road', 'Fehlende Straße anlegen', () => show('newstreet', {})),
       item('gear', 'Einstellungen & Info', () => show('settings')),
       h('button', { class: 'btn big', onClick: () => close() }, 'Schließen'),
     ),
   );
+  void statusSummary().then((st: StatusSummary) => {
+    const chip = (ok: boolean, text: string, onClick?: () => void) =>
+      h(onClick ? 'button' : 'span', { class: ok ? 'chip-ok' : 'chip-warn', onClick }, icon(ok ? 'check' : 'warn', 16), text);
+    statusEl.replaceChildren(
+      chip(st.offline, st.offline ? 'Offline bereit' : st.regions === 0 ? 'Kein Gebiet geladen' : 'Noch nicht offline bereit'),
+      ...(st.updateReady ? [chip(false, 'Update verfügbar – tippen zum Neuladen', () => location.reload())] : []),
+      ...(st.incomplete.length
+        ? [chip(false, `Gebiet unvollständig: ${st.incomplete.map((r) => `${r.name} (${r.gaps} Straßen ohne Nr.)`).join(', ')}`)]
+        : []),
+      ...(st.backupDue ? [chip(false, 'Sicherung fällig', () => (close(), show('data')))] : []),
+    );
+    if (st.backupDue) dataItem.querySelector('span')!.append(h('small', { class: 'menu-note' }, 'Sicherung fällig (über 14 Tage)'));
+  });
 }
 
 /** Falsch erkannte Straße korrigieren: nahe Straßen zur Auswahl (Tour-Straßen zuerst). */

@@ -480,3 +480,20 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .here-row { display: flex; gap: 10px; }
 .here-side { flex: 1; min-height: 72px; font-size: 24px; }
 .here-side:disabled { opacity: 0.35; }
+
+/* Status im Menü, Hinweiszeichen am Menüknopf (nicht nur Farbe: „!“) */
+.status-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-ok, .chip-warn {
+  display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 5px 12px 5px 9px;
+  font-size: 15px; font-weight: 800; border: 2px solid; background: transparent; text-align: left;
+}
+.chip-ok { color: var(--ok); border-color: var(--ok); }
+.chip-warn { color: var(--text); border-color: var(--orange); }
+.menu-btn { position: relative; }
+.badge-attn {
+  position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--orange); color: #000; font-size: 16px; font-weight: 900; display: grid; place-items: center;
+}
+.menu-item > span { display: flex; flex-direction: column; }
+.menu-note { font-size: 14px; font-weight: 800; color: var(--orange-text); }
+:root[data-theme='dark'] .menu-note, :root:not([data-theme]) .menu-note { color: var(--orange); }

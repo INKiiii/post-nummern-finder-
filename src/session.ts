@@ -14,7 +14,18 @@ export interface Target {
   number: string;
 }
 
-let target: Target | null = null;
+const TARGET_KEY = 'hnf-target';
+/** Ziel übersteht ein Neuladen (z. B. App-Update), aber nicht länger als 3 Stunden. */
+function loadTarget(): Target | null {
+  try {
+    const t = JSON.parse(localStorage.getItem(TARGET_KEY) ?? 'null');
+    if (t && typeof t.streetId === 'string' && typeof t.number === 'string' && Date.now() - (t.at ?? 0) < 3 * 3600e3) return { streetId: t.streetId, number: t.number };
+  } catch {
+    /* egal */
+  }
+  return null;
+}
+let target: Target | null = typeof localStorage !== 'undefined' ? loadTarget() : null;
 let last: Match | null = null;
 const listeners = new Set<(m: Match | null, fix: Fix | null) => void>();
 let started = false;
@@ -67,4 +78,10 @@ export function getTarget(): Target | null {
 
 export function setTarget(t: Target | null) {
   target = t;
+  try {
+    if (t) localStorage.setItem(TARGET_KEY, JSON.stringify({ ...t, at: Date.now() }));
+    else localStorage.removeItem(TARGET_KEY);
+  } catch {
+    /* egal */
+  }
 }

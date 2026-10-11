@@ -16,6 +16,7 @@ import { loadHouseInfos } from './houseinfo';
 import { gps } from './gps';
 import { startSession } from './session';
 import { applyTheme } from './settings';
+import { requestPersist, setUpdateReady } from './status';
 
 registerScreen('live', liveScreen as any);
 registerScreen('search', searchScreen as any);
@@ -49,10 +50,25 @@ async function boot() {
     if (names.length) toast(`Kartendaten aktualisiert: ${names.join(', ')}`);
   }, 1500);
 
+  // Daten dauerhaft speichern lassen (iOS kann Web-App-Speicher sonst aufräumen)
+  void requestPersist();
+
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {
-      /* ohne SW läuft die App trotzdem, nur nicht offline */
+    const hadController = !!navigator.serviceWorker.controller;
+    // Neue Version übernommen: nicht mitten in der Tour neu laden, nur anzeigen
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) setUpdateReady();
     });
+    navigator.serviceWorker
+      .register('./sw.js')
+      .then((reg) => {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible' && navigator.onLine) reg.update().catch(() => {});
+        });
+      })
+      .catch(() => {
+        /* ohne SW läuft die App trotzdem, nur nicht offline */
+      });
   }
 }
 
