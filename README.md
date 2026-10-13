@@ -4,6 +4,8 @@ Handy-Webapp (PWA) für Zusteller. Sie startet in einer **Live-Karte**: Die Posi
 
 **Leitprinzipien:** Während der Fahrt nur anzeigen (Eingaben ab ~11 km/h gesperrt, keine Pop-ups, keine Animationen). Keine Vorab-Eingabe von Briefen. Offline zuerst. Geschätzte und selbst gesetzte Daten sind als solche erkennbar, die GPS-Ungenauigkeit wird immer gezeigt. Alles bleibt auf dem Gerät.
 
+> **Weiteres Projekt im Repo:** Der Prototyp *Zustell-Leitstand 3D* (fiktive Demo-Daten) liegt im Ordner [`leitstand/`](leitstand/README.md) und hat eigene Abhängigkeiten, Tests und einen eigenen Prüf-Workflow.
+
 ## Schnellstart
 
 ```bash

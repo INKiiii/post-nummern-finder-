@@ -7,6 +7,8 @@ name: Prüfen
 on:
   push:
     branches-ignore: [main]
+    # Änderungen nur am Leitstand-Prototyp brauchen keine OSM-Prüfung (eigener Workflow leitstand.yml)
+    paths-ignore: ['leitstand/**', '.github/workflows/leitstand.yml']
   workflow_dispatch:
 
 permissions:

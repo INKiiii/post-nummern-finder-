@@ -1,0 +1,35 @@
+# Prüft den Prototyp „Zustell-Leitstand 3D“ (Unterordner leitstand/): Typen, Tests, Build.
+# Veröffentlicht nichts.
+name: Leitstand prüfen
+
+on:
+  push:
+    paths: ['leitstand/**', '.github/workflows/leitstand.yml']
+  pull_request:
+    paths: ['leitstand/**', '.github/workflows/leitstand.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leitstand-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: leitstand
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: leitstand/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
