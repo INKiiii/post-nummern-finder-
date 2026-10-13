@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { MathUtils, PerspectiveCamera, Spherical, Vector3 } from 'three';
 import type { MapControls as MapControlsImpl } from 'three-stdlib';
 import { useAnsicht } from '../state/ansicht';
-import { useLeitstand } from '../state/store';
+import { simUhr, useLeitstand } from '../state/store';
 import { S } from './koord';
 
 export const POLAR_3D = 0.95;
@@ -39,6 +39,7 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   const flug = useAnsicht((s) => s.flug);
   const draufsicht = useAnsicht((s) => s.draufsicht);
   const welt = useLeitstand((s) => s.welt);
+  const folgeVorher = useRef<{ x: number; z: number } | null>(null);
 
   const starte = (ziel: Vector3, r: number, phi: number, theta: number, dauer = 1.3) => {
     const c = ref.current;
@@ -88,6 +89,26 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   useFrame(() => {
     const c = ref.current;
     if (!c) return;
+    // ausgewähltem Fahrzeug folgen (Position aus dem Lagebild)
+    const folgen = useAnsicht.getState().folgen;
+    const lage = useLeitstand.getState().lage;
+    if (folgen && lage) {
+      const p = lage.pose(folgen, simUhr.zeit);
+      if (!p.anRampe) {
+        const x = p.x * S;
+        const z = -p.y * S;
+        if (anim.current) anim.current.nachZiel.set(x, anim.current.nachZiel.y, z);
+        else if (folgeVorher.current) {
+          const dx = x - folgeVorher.current.x;
+          const dz = z - folgeVorher.current.z;
+          c.target.x += dx;
+          c.target.z += dz;
+          camera.position.x += dx;
+          camera.position.z += dz;
+        }
+        folgeVorher.current = { x, z };
+      } else folgeVorher.current = null;
+    } else folgeVorher.current = null;
     const a = anim.current;
     if (a) {
       const t = Math.min(1, (performance.now() - a.start) / a.dauer);
@@ -146,6 +167,7 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
       screenSpacePanning={false}
       onStart={() => {
         anim.current = null;
+        useAnsicht.getState().folgenSetzen(null);
         const c = ref.current;
         const oben = useAnsicht.getState().draufsicht;
         if (c) {

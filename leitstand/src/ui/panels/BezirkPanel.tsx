@@ -5,21 +5,42 @@ import { tourName } from '../../core/vorschlaege';
 import { useAnsicht } from '../../state/ansicht';
 import { useLeitstand } from '../../state/store';
 import { waehleUndZeige } from '../aktionen';
-import { PanelKopf, Zeile } from './Gemeinsam';
+import { AusScans, Balken, Geschaetzt, PanelKopf, Zeile } from './Gemeinsam';
 
 export function BezirkPanel({ id }: { id: string }) {
-  const { ctx, plan, auswertung: aus, annahmen } = useLeitstand();
+  const { ctx, plan, lage, annahmen } = useLeitstand();
+  useLeitstand((s) => s.lageVersion);
   const waehlen = useAnsicht((s) => s.waehlen);
-  if (!ctx || !plan || !aus) return null;
+  if (!ctx || !plan || !lage) return null;
   const bz = ctx.welt.bezirke[id];
+  const bl = lage.bezirk(id);
   const ort = ctx.welt.ortsteile.find((o) => o.id === bz.ortsteilId)!;
   const behaelter = ctx.tag.behaelterIds.filter((b) => ctx.tag.behaelter[b].zielbezirk === id);
   const haeuser = bz.stopps.reduce((n, s) => n + ctx.welt.stopps[s].haeuser.length, 0);
   const tour = ctx.tag.touren.find((t) => behaelter.some((b) => behaelterFolge(plan, t.id).includes(b)));
-  const schritt = tour ? aus.touren[tour.id].schritte.find((s) => s.schritt.art === 'bezirk' && behaelter.includes(s.schritt.behaelterId)) : undefined;
   return (
     <div className="panel">
       <PanelKopf titel={bz.name} unter={`${G.zustellbezirk} ${bz.id} · ${G.ortsteil} ${ort.name}`} farbe={tour?.farbe} onSchliessen={() => waehlen(null)} />
+      <div className="panel-abschnitt">
+        <h3>Fortschritt</h3>
+        <Zeile was={G.pakete}>
+          {bl.pakete.zugestellt} von {bl.pakete.gesamt}
+          {bl.pakete.nicht ? ` (${bl.pakete.nicht} nicht zugestellt)` : ''} <AusScans />
+        </Zeile>
+        <Balken anteil={bl.pakete.gesamt ? (bl.pakete.zugestellt + bl.pakete.nicht) / bl.pakete.gesamt : 0} />
+        <Zeile was={`${G.briefe} und ${G.zeitungen}`}>
+          ca. {Math.round(bl.briefeAnteil * 100)} % <Geschaetzt />
+        </Zeile>
+        <Balken anteil={bl.briefeAnteil} geschaetzt />
+        <Zeile was={G.stopps}>
+          {bl.fertig ? bz.stopps.length : Math.max(0, bl.stoppIndex + (bl.stoppIndex >= 0 ? 0.5 : 0)).toLocaleString('de-DE')} von {bz.stopps.length} <Geschaetzt />
+        </Zeile>
+        {bl.beginn !== null && (
+          <Zeile was="Begonnen / fertig">
+            {fmtUhr(bl.beginn)} / {bl.ende !== null ? fmtUhr(bl.ende) : '…'}
+          </Zeile>
+        )}
+      </div>
       <div className="panel-abschnitt">
         <Zeile was={G.stopps}>{bz.stopps.length}</Zeile>
         <Zeile was="Häuser">{haeuser}</Zeile>
@@ -34,7 +55,7 @@ export function BezirkPanel({ id }: { id: string }) {
               <button className="link" onClick={() => waehleUndZeige({ art: 'behaelter', id: b })}>
                 {b}
               </button>{' '}
-              <span className="leise">· {fmtDauer(z)} im Bezirk</span>
+              <span className="leise">· {fmtDauer(z)} im Bezirk (Plan)</span>
             </Zeile>
           );
         })}
@@ -47,13 +68,10 @@ export function BezirkPanel({ id }: { id: string }) {
         ) : (
           <Zeile was={G.tour}>keine</Zeile>
         )}
-        {schritt && (
-          <Zeile was="Geplant">
-            {fmtUhr(schritt.ankunft)}–{fmtUhr(schritt.ende)}
-          </Zeile>
-        )}
       </div>
-      <p className="leise klein">Die Häuser sind erfunden; jedes Haus steht für einen {G.stopp} mit mehreren Haushalten.</p>
+      <p className="leise klein">
+        {G.briefe} werden nicht einzeln gescannt. Ihr Fortschritt ist aus der Position des {G.fahrzeug}s und der {G.gangfolge} geschätzt.
+      </p>
     </div>
   );
 }

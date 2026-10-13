@@ -14,11 +14,12 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 |---|---|---|
 | 1 | Setup, Datenmodell, Demo-Welt, Rechenmodell, Optimierer, Tests | fertig |
 | 2 | 3D-Szene statisch, Klick-Panels | fertig |
-| 3 | Simulation, Animation, Zeitsteuerung | offen |
-| 4 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D) | offen |
-| 5 | Fahrer-Ansicht, Benachrichtigungen | offen |
-| 6 | Szenarien | offen |
-| 7 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
+| 3 | Datenquellen-Schicht: Scan-Ereignisse, Lagebild, Fahrergerät, Seite „Datenquellen“ | fertig |
+| 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | offen |
+| 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D) | offen |
+| 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | offen |
+| 7 | Szenarien | offen |
+| 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
 
 ## Schnellstart
 
@@ -68,15 +69,68 @@ src/
     optimierer.ts   Zuordnung Behälter → Tour und Reihenfolge
     vorschlaege.ts  Vorschläge und „Andere Tour“
     rechenweg.ts    „Wie kommt die Zahl zustande?“
-    quellen.ts      Schnittstellen VehiclePositionSource, TourDataSource, NotificationSink
-    sicht.ts        Status von Behältern und Fahrzeugen zu einer Uhrzeit
+    quellen.ts      Schnittstellen TourDataSource, ScanQuelle, VehiclePositionSource, FahrerGeraet
+    scan.ts         Scan-Ereignisse (Arten, Herkunft)
+    simulation.ts   Adapter „SimulierteScanner“: erzeugt nur Scan-Ereignisse
+    lagebild.ts     Lage aus dem Ereignisstrom: Positionen, Behälter, Fortschritt, Prognosen
+    route.ts        Routengeometrie und Zeitpläne entlang der Route
+    sendungen.ts    Pakete je Stopp, Briefe geschätzt nach Haushalten, erfundene Adressen
   worker/           Optimierung im Web Worker
   state/            Zustand (zustand): Plan, Annahmen, Verlauf; Auswahl und Kamera
   szene/            3D-Szene (three.js über @react-three/fiber): Gelände, Straßen,
                     Häuser und Behälter per Instancing, Basis, Fahrzeuge, Kamera, Licht
-  ui/               Oberfläche: Leitstand, Panels, Beschriftungen, Prüfansicht
+  geraet/           Übertragung zum Fahrergerät (BroadcastChannel)
+  ui/               Oberfläche: Leitstand, Panels, Ereignisstrom, Datenquellen,
+                    Geräte-Ansicht (fahrer/), Beschriftungen, Prüfansicht
 tests/              Vitest
 ```
+
+## Datenquellen: nur Scans, keine neue Hardware
+
+Der Leitstand nutzt nur Daten, die bei der Arbeit ohnehin entstehen. Alles, was er zeigt
+(3D-Welt, Fortschritt, Restzeiten, Vorschläge), berechnet er aus **einem Ereignisstrom**:
+
+| Ereignis | entsteht bei |
+|---|---|
+| `PAKET_EINGANG_BASIS` | Eingangsscan in der Basis (Paket → Behälter, Adresse) |
+| `BEHAELTER_VERLADEN` | Verladescan (Behälter-Barcode, Fahrzeug, Zeit) – nur mit optionalem Etikett |
+| `PAKET_IN_FAHRZEUG` | Beladescan am Handscanner |
+| `TOUR_START` / `TOUR_ENDE` | An- und Abmeldung am Handscanner |
+| `POSITION` | Standort des fahrzeuggebundenen Handscanners, ungefähr, alle 60 s, nur während der Tour |
+| `ZUSTELLUNG` / `NICHT_ZUGESTELLT` | Zustellscan mit Zeit und Ort (bzw. Grund) |
+
+* **Adapter „SimulierteScanner“** (`src/core/simulation.ts`) spielt einen erfundenen Tag ab und
+  erzeugt nur diese Ereignisse. Der Ist-Ablauf weicht leicht vom Plan ab (Tempo je Tour,
+  streuende Halte- und Fahrzeiten, einzelne nicht zustellbare Pakete). Ein echter Adapter könnte
+  denselben Strom liefern (`ScanQuelle` in `src/core/scan.ts`).
+* **Lagebild** (`src/core/lagebild.ts`) berechnet daraus die Lage: Positionen werden auf die
+  geplante Route abgebildet und zwischen den Minutenmeldungen interpoliert (Anzeige eine Minute
+  verzögert). **Behälter** haben keinen eigenen Tracker, ihre Position ist die ihres Fahrzeugs
+  (per Verladescan oder abgeleitet aus den Paketscans). **Briefe** werden nicht gescannt; ihr
+  Fortschritt wird aus Position und Gangfolge **geschätzt** und im UI so gekennzeichnet.
+  Prognosen (Restzeit, Rückkehr) kommen aus dem Plan und dem beobachteten Tempo.
+* **Vorschläge ab jetzt** nutzen Startzustände aus dem Lagebild (wo ist jedes Fahrzeug, was ist
+  an Bord, was ist erledigt). Umplanungen gelten unterwegs ab einem sicheren Punkt (Ende des
+  laufenden Bezirks bzw. nächste Kreuzung voraus), den der Leitstand festlegt.
+* **FahrerGeraet** (`src/core/quellen.ts`): Nachrichten an das Gerät der Tour und Bestätigungen
+  zurück. Im Prototyp eine Ansicht im Stil einer einfachen Scanner-App (`#/fahrer`), verbunden
+  über BroadcastChannel (zwei Fenster nebeneinander).
+* Die Seite **„Datenquellen“** (`#/datenquellen`) zeigt Bedarf | heute vorhanden über | neu
+  nötig. Ergebnis: keine neue Hardware, nur eine Schnittstelle und optional ein Barcode-Etikett
+  am Rollbehälter.
+
+### So testest du Phase 3
+
+1. `npm run dev`, im Leitstand ▶ drücken (Tempo z. B. 60×) oder die Zeitleiste ziehen.
+2. Um 07:00 beginnt das Beladen: Behälter verschwinden aus der Halle, sobald ein Verladescan
+   kommt; ab etwa 07:30 fahren die Fahrzeuge los. Unten links läuft der **Ereignisstrom** mit
+   (Knopf „Ereignisse“ blendet ihn aus).
+3. Tour anklicken: Panel mit Werten „aus Scans“ und „geschätzt“, Prognose der Rückkehr, Route.
+   Die Kamera folgt dem Fahrzeug.
+4. Menü → „Geräte-Ansicht (Fahrer)“ öffnet ein zweites Fenster; Tour wählen. Im Leitstand im
+   Fahrzeug-Panel „Bitte melden“ senden → auf dem Gerät „Verstanden“ → im Leitstand steht
+   „verstanden 10:03“.
+5. Menü → „Datenquellen“; dort lässt sich das Barcode-Etikett am Behälter ab- und anschalten.
 
 ## Rechenmodell
 
@@ -140,6 +194,7 @@ mit den Standard-Annahmen sichtbar werden.
 * **Farben**: `src/theme.ts`
 * **Annahmen**: `src/config.ts` oder direkt im UI
 * **Echte Datenquellen**: die Schnittstellen in `src/core/quellen.ts` implementieren
+  (vor allem `ScanQuelle` für den Ereignisstrom und `FahrerGeraet` für Nachrichten)
 
 ## Datenschutz by Design
 

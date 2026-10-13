@@ -20,7 +20,9 @@ export function KernAnsicht() {
   const [behaelter, setBehaelter] = useState<string | null>(null);
   const { ctx, plan, auswertung: aus, startAuswertung: start } = s;
 
-  const optionen = useMemo(() => (ctx && plan && behaelter ? optionenFuerBehaelter(ctx, plan, behaelter) : []), [ctx, plan, behaelter]);
+  // Umplanen ab jetzt: Startzustände aus dem Lagebild, offene Schritte des Plans
+  const { ctxLive, restplan } = s;
+  const optionen = useMemo(() => (ctxLive && restplan && behaelter ? optionenFuerBehaelter(ctxLive, restplan, behaelter) : []), [ctxLive, restplan, behaelter]);
 
   if (!ctx || !plan || !aus || !start) return <div style={{ padding: 24 }}>Lade Demo-Welt …</div>;
 
@@ -183,7 +185,7 @@ export function KernAnsicht() {
                 optionen={optionen}
                 onSchliessen={() => setBehaelter(null)}
                 onWahl={(o) => {
-                  s.planSetzen(o.plan, `${G.behaelter} ${behaelter} → ${tourName(ctx, o.tourId)}`);
+                  s.restplanUebernehmen(o.plan, `${G.behaelter} ${behaelter} → ${tourName(ctx, o.tourId)}`);
                   setBehaelter(null);
                 }}
               />
@@ -201,7 +203,7 @@ export function KernAnsicht() {
             </div>
             {s.vorschlaege.length === 0 && !s.vorschlaegeLaden && <div className="leise">Keine Verbesserung gefunden. Der Plan ist gut.</div>}
             {s.vorschlaege.map((v) => (
-              <VorschlagKarte key={v.id} v={v} ctx={ctx} onUebernehmen={() => s.planSetzen(v.plan, v.titel)} />
+              <VorschlagKarte key={v.id} v={v} ctx={ctx} onUebernehmen={() => s.vorschlagUebernehmen(v)} />
             ))}
           </div>
 

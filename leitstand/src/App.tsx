@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useLeitstand } from './state/store';
+import { Datenquellen } from './ui/Datenquellen';
+import { ScannerApp } from './ui/fahrer/ScannerApp';
 import { KernAnsicht } from './ui/KernAnsicht';
 import { Leitstand } from './ui/Leitstand';
 import { RechenwegDialog } from './ui/Rechenweg';
+import { useSimulationsTakt } from './ui/takt';
 
 function useHash(): string {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -15,14 +18,24 @@ function useHash(): string {
 }
 
 export function App() {
-  const laden = useLeitstand((s) => s.laden);
   const hash = useHash();
+  // Geräte-Ansicht: eigenes Fenster, eigene Daten, nur über die Schnittstelle FahrerGeraet verbunden
+  if (hash.startsWith('#/fahrer')) {
+    const tour = hash.split('/')[2] || null;
+    return <ScannerApp key={tour ?? 'wahl'} tourId={tour} />;
+  }
+  return <LeitstandFenster hash={hash} />;
+}
+
+function LeitstandFenster({ hash }: { hash: string }) {
+  const laden = useLeitstand((s) => s.laden);
   useEffect(() => {
     void laden();
   }, [laden]);
+  useSimulationsTakt();
   return (
     <>
-      {hash === '#/kern' ? <KernAnsicht /> : <Leitstand />}
+      {hash === '#/kern' ? <KernAnsicht /> : hash === '#/datenquellen' ? <Datenquellen /> : <Leitstand />}
       <RechenwegDialog />
     </>
   );

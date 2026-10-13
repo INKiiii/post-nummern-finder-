@@ -2,16 +2,18 @@
 import { basisPosition, behaelterPosition, bezirkMitte, fahrzeugPosition } from '../szene/auswahl';
 import { uebersichtsAbstand, uebersichtsPolar } from '../szene/Kamera';
 import { useAnsicht, type Auswahl } from '../state/ansicht';
-import { useLeitstand } from '../state/store';
+import { simUhr, useLeitstand } from '../state/store';
 
 export function waehleUndZeige(a: Auswahl): void {
-  const { welt, tag, plan } = useLeitstand.getState();
-  const { waehlen, fliegen } = useAnsicht.getState();
+  const { welt, tag, plan, lage } = useLeitstand.getState();
+  const { waehlen, fliegen, folgenSetzen } = useAnsicht.getState();
   waehlen(a);
   if (!a || !welt || !tag || !plan) return;
   if (a.art === 'fahrzeug') {
-    const p = fahrzeugPosition(welt, tag, a.id);
-    fliegen({ ziel: [p.x, 0.3, p.z], distanz: 14 });
+    const p = fahrzeugPosition(welt, tag, a.id, lage, simUhr.zeit);
+    fliegen({ ziel: [p.x, 0.3, p.z], distanz: p.unterwegs ? 70 : 14 });
+    // fahrende Fahrzeuge behält die Kamera im Blick
+    folgenSetzen(p.unterwegs ? a.id : null);
   } else if (a.art === 'behaelter') {
     const p = behaelterPosition(welt, tag, plan, a.id);
     fliegen({ ziel: [p.x, 0.3, p.z], distanz: 9 });

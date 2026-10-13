@@ -1,30 +1,32 @@
 import { G } from '../../glossar';
-import { behaelterSicht } from '../../core/sicht';
 import { useAnsicht } from '../../state/ansicht';
 import { useLeitstand } from '../../state/store';
 import { basisZeigen } from '../aktionen';
-import { PanelKopf, Zeile } from './Gemeinsam';
+import { AusScans, PanelKopf, Zeile } from './Gemeinsam';
 
 export function BasisPanel() {
-  const { ctx, plan, auswertung: aus, zeit } = useLeitstand();
+  const { ctx, lage } = useLeitstand();
+  useLeitstand((s) => s.lageVersion);
   const waehlen = useAnsicht((s) => s.waehlen);
-  if (!ctx || !plan || !aus) return null;
-  const sicht = Object.values(behaelterSicht(ctx, plan, aus, zeit));
-  const anRampe = ctx.tag.touren.filter((t) => {
-    const a = aus.touren[t.id];
-    return !a.aktiv || a.abfahrt === null || zeit < a.abfahrt || zeit >= a.ende;
-  }).length;
+  if (!ctx || !lage) return null;
+  const status = ctx.tag.behaelterIds.map((b) => lage.behaelter(b).status);
+  const zaehle = (s: string) => status.filter((x) => x === s).length;
+  const anRampe = ctx.tag.touren.filter((t) => lage.fahrzeug(t.id).phase !== 'unterwegs').length;
   return (
     <div className="panel">
       <PanelKopf titel={ctx.welt.basis.name} unter={`${G.halle}, ${ctx.welt.basis.rampen.length} ${G.rampen}, ${G.bereitstellflaeche}, ${G.parkplaetze}`} onSchliessen={() => waehlen(null)} />
       <div className="panel-abschnitt">
-        <Zeile was={`${G.behaelterPlural} in der ${G.halle}`}>{sicht.filter((b) => b.status === 'halle').length}</Zeile>
-        <Zeile was="Verladen">{sicht.filter((b) => b.status === 'verladen').length}</Zeile>
-        <Zeile was="Unterwegs">{sicht.filter((b) => b.status === 'unterwegs').length}</Zeile>
-        <Zeile was="Zugestellt">{sicht.filter((b) => b.status === 'zugestellt').length}</Zeile>
+        <h3>
+          {G.behaelterPlural} <AusScans />
+        </h3>
+        <Zeile was={`In der ${G.halle}`}>{zaehle('halle')}</Zeile>
+        <Zeile was="Verladen">{zaehle('verladen')}</Zeile>
+        <Zeile was="Unterwegs">{zaehle('unterwegs')}</Zeile>
+        <Zeile was="Zugestellt">{zaehle('zugestellt')}</Zeile>
         <Zeile was={`${G.fahrzeuge} an der Basis`}>
           {anRampe} von {ctx.tag.touren.length}
         </Zeile>
+        <Zeile was="Pakete eingegangen">{lage.zaehler.PAKET_EINGANG_BASIS ?? 0}</Zeile>
       </div>
       <button className="knopf" onClick={basisZeigen}>
         {G.rampen} zeigen

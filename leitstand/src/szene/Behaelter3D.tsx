@@ -2,8 +2,10 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { Color, InstancedMesh, Object3D } from 'three';
 import { G } from '../glossar';
-import type { Behaelter, Plan, Tag, Welt } from '../core/types';
+import { behaelterFolge } from '../core/modell';
+import type { Plan, Tag, Welt } from '../core/types';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
+import { useLeitstand } from '../state/store';
 import { BEHAELTER_MASS, behaelterGeometrie } from './geometrie';
 import { setzeAnker } from './beschriftung';
 import { hallenPlatz } from './layout';
@@ -12,8 +14,18 @@ import { Umriss, umrissDicke } from './Umriss';
 const dummy = new Object3D();
 const BODEN = 0.12;
 
-/** Rollbehälter auf der Bereitstellfläche (Instancing), in Tourfarbe */
-export function Behaelter3D({ welt, tag, plan, sicht }: { welt: Welt; tag: Tag; plan: Plan; sicht: Record<string, Behaelter> }) {
+/**
+ * Rollbehälter auf der Bereitstellfläche (Instancing), in Tourfarbe. Sobald das Lagebild
+ * einen Behälter im Fahrzeug sieht, verschwindet er aus der Halle: Er hat keinen eigenen
+ * Tracker, seine Position ist die des Fahrzeugs.
+ */
+export function Behaelter3D({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan }) {
+  const lage = useLeitstand((s) => s.lage);
+  const lageVersion = useLeitstand((s) => s.lageVersion);
+  const inHalle = useMemo(() => {
+    void lageVersion;
+    return Object.fromEntries(tag.behaelterIds.map((id) => [id, !lage || lage.behaelter(id).status === 'halle']));
+  }, [lage, lageVersion, tag]);
   const ref = useRef<InstancedMesh>(null);
   const geo = useMemo(() => behaelterGeometrie(), []);
   const { auswahl, hover, waehlen, hovern, fliegen, tippSetzen, kameraAbstand } = useAnsicht();
@@ -26,20 +38,20 @@ export function Behaelter3D({ welt, tag, plan, sicht }: { welt: Welt; tag: Tag; 
     const c = new Color();
     ids.forEach((id, i) => {
       const p = posen[id];
-      const sichtbar = sicht[id].status === 'halle';
+      const sichtbar = inHalle[id];
       dummy.position.set(p.x, BODEN, p.z);
       dummy.rotation.set(0, p.rot, 0);
       dummy.scale.setScalar(sichtbar ? 1 : 0);
       dummy.updateMatrix();
       m.setMatrixAt(i, dummy.matrix);
-      const tour = tag.touren.find((t) => t.id === sicht[id].tourId);
+      const tour = tag.touren.find((t) => behaelterFolge(plan, t.id).includes(id));
       c.set(tour ? tour.farbe : '#8a919b');
       m.setColorAt(i, c);
     });
     m.instanceMatrix.needsUpdate = true;
     m.instanceColor!.needsUpdate = true;
     m.computeBoundingSphere();
-  }, [ids, posen, sicht, tag]);
+  }, [ids, posen, inHalle, tag, plan]);
 
   const onMove = (e: ThreeEvent<PointerEvent>) => {
     if (e.instanceId === undefined) return;
@@ -65,7 +77,7 @@ export function Behaelter3D({ welt, tag, plan, sicht }: { welt: Welt; tag: Tag; 
     fliegen({ ziel: [p.x, 0.3, p.z], distanz: 9 });
   };
 
-  const markiert = [auswahl, hover].filter((a) => a?.art === 'behaelter' && sicht[a.id]?.status === 'halle') as Array<{ art: 'behaelter'; id: string }>;
+  const markiert = [auswahl, hover].filter((a) => a?.art === 'behaelter' && inHalle[a.id]) as Array<{ art: 'behaelter'; id: string }>;
   return (
     <group>
       <instancedMesh ref={ref} args={[geo, undefined, ids.length]} castShadow receiveShadow onPointerMove={onMove} onPointerOut={onOut} onClick={onClick}>

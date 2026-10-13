@@ -1,6 +1,5 @@
 import { useLayoutEffect, useMemo } from 'react';
 import { G } from '../glossar';
-import { fahrzeugSicht } from '../core/sicht';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
 import { useLeitstand } from '../state/store';
 import { labelRef, setzeAnker } from '../szene/beschriftung';
@@ -10,7 +9,8 @@ import { halleMitte } from '../szene/layout';
 
 /** Alle Beschriftungen der Szene als DOM-Ebene über dem Canvas */
 export function LabelEbene() {
-  const { ctx, plan, auswertung: aus, zeit } = useLeitstand();
+  const { ctx, lage, zeit } = useLeitstand();
+  const lageVersion = useLeitstand((s) => s.lageVersion);
   const { kameraAbstand: abstand, auswahl, tipp } = useAnsicht();
 
   // feste Ankerpunkte
@@ -27,9 +27,10 @@ export function LabelEbene() {
   }, [ctx]);
 
   const fahrzeuge = useMemo(() => {
-    if (!ctx || !plan || !aus) return [];
-    return ctx.tag.touren.map((t) => ({ t, s: fahrzeugSicht(ctx, plan, aus, t.id, zeit) }));
-  }, [ctx, plan, aus, zeit]);
+    void lageVersion;
+    if (!ctx || !lage) return [];
+    return ctx.tag.touren.map((t) => ({ t, p: lage.prognose(t.id, zeit), besetzt: ctx.tag.start[t.id].besetzt }));
+  }, [ctx, lage, zeit, lageVersion]);
 
   if (!ctx) return null;
   const { welt } = ctx;
@@ -51,16 +52,16 @@ export function LabelEbene() {
       <div ref={labelRef('basis')} data-aus={abstand > 70 ? '0' : '1'} className="label">
         <div className="szene-label basis">{G.zustellbasis}</div>
       </div>
-      {fahrzeuge.map(({ t, s }) => {
-        const anBasis = s.status === 'bereit' || s.status === 'beladen' || s.status === 'zurueck' || s.status === 'unbesetzt';
+      {fahrzeuge.map(({ t, p, besetzt }) => {
+        const anBasis = p.phase !== 'unterwegs';
         const gewaehlt = gleicheAuswahl(auswahl, { art: 'fahrzeug', id: t.id });
         const zeigen = !anBasis || abstand < 140 || gewaehlt;
-        const grau = s.status === 'unbesetzt';
+        const grau = !besetzt;
         return (
           <div key={t.id} ref={labelRef(`fz:${t.id}`)} data-aus={zeigen ? '0' : '1'} className="label">
             <div className={`fahrzeug-label ${gewaehlt ? 'aktiv' : ''}`} style={{ ['--tourfarbe' as string]: grau ? '#8a919b' : t.farbe }}>
               <span className="nr">{t.nr}</span>
-              {labelText(s)}
+              {labelText(p, zeit, besetzt)}
             </div>
           </div>
         );

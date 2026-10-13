@@ -1,4 +1,5 @@
 /** Hilfen rund um die Auswahl: betroffene Bezirke, Mittelpunkte, Flugziele */
+import type { Lagebild } from '../core/lagebild';
 import { behaelterFolge } from '../core/modell';
 import type { Plan, Tag, Welt } from '../core/types';
 import type { Auswahl } from '../state/ansicht';
@@ -36,11 +37,13 @@ export function bezirkMitte(welt: Welt, id: string): { x: number; z: number } {
   return p;
 }
 
-/** Position eines Fahrzeugs (Phase 2: an der Rampe) */
-export function fahrzeugPosition(welt: Welt, tag: Tag, tourId: string): { x: number; z: number } {
+/** Angezeigte Position eines Fahrzeugs (aus dem Lagebild, sonst an der Rampe) */
+export function fahrzeugPosition(welt: Welt, tag: Tag, tourId: string, lage: Lagebild | null, zeit: number): { x: number; z: number; unterwegs: boolean } {
   const t = tag.touren.find((x) => x.id === tourId)!;
-  const p = rampenPose(welt, t.rampe);
-  return { x: p.x, z: p.z };
+  const p = lage?.pose(tourId, zeit);
+  if (p && !p.anRampe) return { x: p.x * S, z: -p.y * S, unterwegs: true };
+  const r = rampenPose(welt, t.rampe);
+  return { x: r.x, z: r.z, unterwegs: false };
 }
 
 export function behaelterPosition(welt: Welt, tag: Tag, plan: Plan, id: string): { x: number; z: number } {

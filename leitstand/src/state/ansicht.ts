@@ -40,6 +40,8 @@ interface AnsichtZustand {
   kameraAbstand: number;
   /** kurzer Hinweis am Mauszeiger (Ankerpunkt „tipp“) */
   tipp: string | null;
+  /** Kamera folgt diesem Fahrzeug (Tour-ID) */
+  folgen: string | null;
 
   waehlen: (a: Auswahl) => void;
   hovern: (a: Auswahl) => void;
@@ -49,6 +51,7 @@ interface AnsichtZustand {
   tourDaecherSetzen: (an: boolean) => void;
   kameraAbstandSetzen: (d: number) => void;
   tippSetzen: (t: string | null) => void;
+  folgenSetzen: (tourId: string | null) => void;
 }
 
 let flugNr = 0;
@@ -62,8 +65,9 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   tourDaecher: true,
   kameraAbstand: 1200,
   tipp: null,
+  folgen: null,
 
-  waehlen: (auswahl) => set({ auswahl }),
+  waehlen: (auswahl) => set({ auswahl, folgen: auswahl?.art === 'fahrzeug' && auswahl.id === get().folgen ? get().folgen : null }),
   hovern: (hover) => {
     const h = get().hover;
     if (h?.art === hover?.art && h?.id === hover?.id) return;
@@ -78,6 +82,7 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
     const alt = get().kameraAbstand;
     if (Math.abs(Math.log(d / alt)) > 0.08) set({ kameraAbstand: d });
   },
+  folgenSetzen: (folgen) => set({ folgen }),
   tippSetzen: (tipp) => {
     if (get().tipp !== tipp) set({ tipp });
   },

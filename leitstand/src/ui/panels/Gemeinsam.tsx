@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { G } from '../../glossar';
-import type { BehaelterStatus } from '../../core/types';
+import type { BehaelterLageStatus } from '../../core/lagebild';
 
-export const STATUS_TEXT: Record<BehaelterStatus, string> = {
+export const STATUS_TEXT: Record<BehaelterLageStatus, string> = {
   halle: `In der ${G.halle}`,
   verladen: 'Verladen',
   unterwegs: 'Unterwegs',
@@ -32,10 +32,28 @@ export function Zeile({ was, children }: { was: ReactNode; children: ReactNode }
   );
 }
 
-export function Balken({ anteil, warnung }: { anteil: number; warnung?: boolean }) {
+export function Balken({ anteil, warnung, geschaetzt }: { anteil: number; warnung?: boolean; geschaetzt?: boolean }) {
   return (
-    <div className="balken">
+    <div className={`balken ${geschaetzt ? 'geschaetzt' : ''}`}>
       <div className={`fuellung ${warnung ? 'warn' : ''}`} style={{ width: `${Math.min(100, Math.max(0, anteil * 100))}%` }} />
     </div>
+  );
+}
+
+/** Kennzeichnung für geschätzte Werte */
+export function Geschaetzt({ titel = 'geschätzt' }: { titel?: string }) {
+  return (
+    <span className="marke geschaetzt" title="Nicht gescannt, sondern aus Position und Gangfolge geschätzt">
+      {titel}
+    </span>
+  );
+}
+
+/** Kennzeichnung für Werte aus Scans */
+export function AusScans({ titel = 'aus Scans' }: { titel?: string }) {
+  return (
+    <span className="marke scan" title="Direkt aus Scan-Ereignissen">
+      {titel}
+    </span>
   );
 }

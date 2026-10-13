@@ -1,7 +1,5 @@
 import { Canvas } from '@react-three/fiber';
-import { useMemo } from 'react';
 import { NeutralToneMapping, PCFShadowMap } from 'three';
-import { behaelterSicht } from '../core/sicht';
 import { useAnsicht } from '../state/ansicht';
 import { useLeitstand } from '../state/store';
 import { Basis } from './Basis';
@@ -17,11 +15,11 @@ import { Strassen } from './Strassen';
 
 /** Die 3D-Welt des Leitstands */
 export function Szene() {
-  const { ctx, plan, auswertung: aus, zeit } = useLeitstand();
+  const ctx = useLeitstand((s) => s.ctx);
+  const plan = useLeitstand((s) => s.plan);
   const qualitaet = useAnsicht((s) => s.qualitaet);
   const waehlen = useAnsicht((s) => s.waehlen);
-  const sicht = useMemo(() => (ctx && plan && aus ? behaelterSicht(ctx, plan, aus, zeit) : null), [ctx, plan, aus, zeit]);
-  if (!ctx || !plan || !aus || !sicht) return null;
+  if (!ctx || !plan) return null;
   const start = startKamera(ctx.welt.breiteKm, ctx.welt.hoeheKm);
   return (
     <Canvas
@@ -43,10 +41,10 @@ export function Szene() {
       <Strassen welt={ctx.welt} />
       <Haeuser welt={ctx.welt} tag={ctx.tag} plan={plan} />
       <Basis welt={ctx.welt} />
-      <Behaelter3D welt={ctx.welt} tag={ctx.tag} plan={plan} sicht={sicht} />
-      <Fahrzeuge ctx={ctx} plan={plan} aus={aus} zeit={zeit} />
+      <Behaelter3D welt={ctx.welt} tag={ctx.tag} plan={plan} />
+      <Fahrzeuge ctx={ctx} />
       <Beschriftungen ctx={ctx} />
-      <Route ctx={ctx} aus={aus} />
+      <Route ctx={ctx} />
       <LabelProjektor />
     </Canvas>
   );

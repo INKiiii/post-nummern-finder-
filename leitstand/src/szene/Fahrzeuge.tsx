@@ -1,14 +1,17 @@
-import { useMemo } from 'react';
-import { BoxGeometry, CylinderGeometry } from 'three';
+import { useFrame } from '@react-three/fiber';
+import { useMemo, useRef } from 'react';
+import { BoxGeometry, CylinderGeometry, Group } from 'three';
 import { fmtUhr } from '../core/format';
-import type { Kontext, PlanAuswertung } from '../core/modell';
-import { fahrzeugSicht, type FahrzeugSicht } from '../core/sicht';
-import type { Plan, Tour } from '../core/types';
+import type { Prognose } from '../core/lagebild';
+import type { Kontext } from '../core/modell';
+import type { Tour } from '../core/types';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
+import { simUhr, useLeitstand } from '../state/store';
 import { setzeAnker } from './beschriftung';
+import { S } from './koord';
 import { rampenPose } from './layout';
-import { Umriss, umrissDicke } from './Umriss';
 import { textTextur } from './textur';
+import { Umriss, umrissDicke } from './Umriss';
 
 /** Fahrzeugmaße in Szene-Einheiten (überhöht): Länge 1,2 · Breite 0,52 */
 const GEO = {
@@ -29,53 +32,82 @@ const RAEDER: Array<[number, number]> = [
   [-0.42, -0.24],
 ];
 
-export function labelText(s: FahrzeugSicht): string {
-  switch (s.status) {
-    case 'bereit':
-      return s.abfahrt !== null ? `ab ${fmtUhr(s.abfahrt)}` : 'bereit';
-    case 'beladen':
+/** Text des Labels über dem Fahrzeug, aus der Prognose des Lagebilds */
+export function labelText(p: Prognose, zeit: number, besetzt: boolean): string {
+  if (!besetzt) return 'unbesetzt';
+  switch (p.phase) {
+    case 'rampe':
+      return p.naechster ? `ab ${fmtUhr(p.abfahrt)}` : 'bereit';
+    case 'laedt':
       return 'lädt';
-    case 'unterwegs':
-    case 'rueckfahrt':
-      return s.naechster ? (s.naechster.vorOrt ? `${Math.round(s.naechster.ende - s.naechster.ankunft)} Min vor Ort` : `${Math.max(1, Math.round(s.naechster.restMin))} Min`) : '';
+    case 'unterwegs': {
+      const n = p.naechster;
+      if (!n) return '';
+      if (n.vorOrt) return `vor Ort · ${Math.max(1, Math.round(n.ende - zeit))} Min`;
+      return `${Math.max(1, Math.round(n.ankunft - zeit))} Min`;
+    }
     case 'zurueck':
       return 'zurück';
-    case 'unbesetzt':
-      return 'unbesetzt';
-    case 'defekt':
-      return 'Defekt';
   }
 }
 
-export function Fahrzeuge({ ctx, plan, aus, zeit }: { ctx: Kontext; plan: Plan; aus: PlanAuswertung; zeit: number }) {
+export function Fahrzeuge({ ctx }: { ctx: Kontext }) {
   return (
     <group>
       {ctx.tag.touren.map((t) => (
-        <Fahrzeug key={t.id} tour={t} ctx={ctx} sicht={fahrzeugSicht(ctx, plan, aus, t.id, zeit)} />
+        <Fahrzeug key={t.id} tour={t} ctx={ctx} />
       ))}
     </group>
   );
 }
 
-function Fahrzeug({ tour, ctx, sicht }: { tour: Tour; ctx: Kontext; sicht: FahrzeugSicht }) {
-  const { auswahl, hover, waehlen, hovern, fliegen, kameraAbstand } = useAnsicht();
-  const pose = rampenPose(ctx.welt, tour.rampe);
+function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
+  const gruppe = useRef<Group>(null);
+  const winkel = useRef<number | null>(null);
+  const { auswahl, hover, waehlen, hovern, fliegen, folgenSetzen, kameraAbstand } = useAnsicht();
+  const lage = useLeitstand((s) => s.lage);
+  const rampe = rampenPose(ctx.welt, tour.rampe);
   const ich = { art: 'fahrzeug' as const, id: tour.id };
   const gewaehlt = gleicheAuswahl(auswahl, ich);
   const gehovert = gleicheAuswahl(hover, ich);
-  const anBasis = sicht.status === 'bereit' || sicht.status === 'beladen' || sicht.status === 'zurueck' || sicht.status === 'unbesetzt';
-  // in der Übersicht größer zeichnen, damit Fahrzeuge sichtbar bleiben (an der Basis nur leicht)
-  const zoom = Math.min(anBasis ? 1.4 : 9, Math.max(1, kameraAbstand / 45));
   const dachTextur = useMemo(() => textTextur(String(tour.nr), tour.farbe, '#ffffff', 192, 128), [tour.nr, tour.farbe]);
-  setzeAnker(`fz:${tour.id}`, pose.x, 1.0 * zoom, pose.z);
-  const umriss = gewaehlt || gehovert;
-  const grau = sicht.status === 'unbesetzt';
+  const grau = !ctx.tag.start[tour.id].besetzt;
+  const zoomRef = useRef(1);
 
+  useFrame((_, dt) => {
+    const g = gruppe.current;
+    if (!g || !lage) return;
+    const p = lage.pose(tour.id, simUhr.zeit);
+    const abstand = useAnsicht.getState().kameraAbstand;
+    // in der Übersicht größer zeichnen, damit Fahrzeuge sichtbar bleiben (an der Basis nur leicht)
+    const zoom = Math.min(p.anRampe ? 1.4 : 9, Math.max(1, abstand / 45));
+    zoomRef.current = zoom;
+    let ziel: number;
+    if (p.anRampe) {
+      g.position.set(rampe.x, 0, rampe.z);
+      ziel = rampe.rot;
+    } else {
+      g.position.set(p.x * S, 0, -p.y * S);
+      ziel = p.richtung;
+    }
+    // sanft lenken statt an jeder Ecke springen
+    if (winkel.current === null || p.anRampe) winkel.current = ziel;
+    else {
+      const d = Math.atan2(Math.sin(ziel - winkel.current), Math.cos(ziel - winkel.current));
+      winkel.current += d * Math.min(1, dt * 8);
+    }
+    g.rotation.y = winkel.current;
+    g.scale.setScalar(zoom);
+    setzeAnker(`fz:${tour.id}`, g.position.x, 1.0 * zoom, g.position.z);
+  });
+
+  const umriss = gewaehlt || gehovert;
+  const dicke = umrissDicke(kameraAbstand, gewaehlt ? 1.3 : 0.8) / zoomRef.current;
   return (
     <group
-      position={[pose.x, 0, pose.z]}
-      rotation-y={pose.rot}
-      scale={zoom}
+      ref={gruppe}
+      position={[rampe.x, 0, rampe.z]}
+      rotation-y={rampe.rot}
       onPointerOver={(e) => {
         e.stopPropagation();
         hovern(ich);
@@ -89,17 +121,20 @@ function Fahrzeug({ tour, ctx, sicht }: { tour: Tour; ctx: Kontext; sicht: Fahrz
         if (e.delta > 6) return;
         e.stopPropagation();
         waehlen(ich);
-        fliegen({ ziel: [pose.x, 0.3, pose.z], distanz: 14 });
+        const g = gruppe.current!;
+        const faehrt = lage ? !lage.pose(tour.id, simUhr.zeit).anRampe : false;
+        fliegen({ ziel: [g.position.x, 0.3, g.position.z], distanz: faehrt ? 70 : 14 });
+        folgenSetzen(faehrt ? tour.id : null);
       }}
     >
       <mesh geometry={GEO.kasten} castShadow receiveShadow>
         <meshLambertMaterial color={grau ? '#c9ccd1' : '#f4f5f7'} />
       </mesh>
-      {umriss && <Umriss geometrie={GEO.kasten} dicke={umrissDicke(kameraAbstand, gewaehlt ? 1.3 : 0.8) / zoom} />}
+      {umriss && <Umriss geometrie={GEO.kasten} dicke={dicke} />}
       <mesh geometry={GEO.kabine} castShadow>
         <meshLambertMaterial color={grau ? '#c9ccd1' : '#f4f5f7'} />
       </mesh>
-      {umriss && <Umriss geometrie={GEO.kabine} dicke={umrissDicke(kameraAbstand, gewaehlt ? 1.3 : 0.8) / zoom} />}
+      {umriss && <Umriss geometrie={GEO.kabine} dicke={dicke} />}
       <mesh geometry={GEO.haube} castShadow>
         <meshLambertMaterial color="#e9ebee" />
       </mesh>

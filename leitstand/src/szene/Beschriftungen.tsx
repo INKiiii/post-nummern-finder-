@@ -1,8 +1,8 @@
 import { Line } from '@react-three/drei';
 import { useMemo } from 'react';
-import type { Kontext, PlanAuswertung } from '../core/modell';
-import { tourWeg } from '../core/route';
+import type { Kontext } from '../core/modell';
 import { useAnsicht } from '../state/ansicht';
+import { useLeitstand } from '../state/store';
 import { S } from './koord';
 
 /** Treffpunkte als Pins (Namen in der Beschriftungsebene) */
@@ -31,17 +31,25 @@ export function Beschriftungen({ ctx }: { ctx: Kontext }) {
   );
 }
 
-/** Geplante Route der ausgewählten Tour, gestrichelt in Tourfarbe */
-export function Route({ ctx, aus }: { ctx: Kontext; aus: PlanAuswertung }) {
+/** Route der ausgewählten Tour (laut Lagebild), gestrichelt in Tourfarbe */
+export function Route({ ctx }: { ctx: Kontext }) {
   const auswahl = useAnsicht((s) => s.auswahl);
   const abstand = useAnsicht((s) => s.kameraAbstand);
-  const tourId = auswahl?.art === 'fahrzeug' ? auswahl.id : auswahl?.art === 'behaelter' ? aus.tourIds.find((id) => aus.touren[id].zustellt.includes(auswahl.id)) : undefined;
+  const lage = useLeitstand((s) => s.lage);
+  const plan = useLeitstand((s) => s.plan);
+  const lageVersion = useLeitstand((s) => s.lageVersion);
+  const tourId =
+    auswahl?.art === 'fahrzeug'
+      ? auswahl.id
+      : auswahl?.art === 'behaelter'
+        ? ctx.tag.touren.find((t) => plan?.touren[t.id]?.schritte.some((x) => x.art === 'bezirk' && x.behaelterId === auswahl.id))?.id
+        : undefined;
+  const route = tourId && lage ? lage.fahrzeug(tourId).route : null;
   const punkte = useMemo(() => {
-    if (!tourId) return null;
-    const weg = tourWeg(ctx, aus, tourId);
-    if (weg.length < 2) return null;
-    return weg.map((n) => [ctx.welt.netz.knoten[n].x * S, 0.35, -ctx.welt.netz.knoten[n].y * S] as [number, number, number]);
-  }, [ctx, aus, tourId]);
+    void lageVersion;
+    if (!route || route.punkte.length < 2) return null;
+    return route.punkte.map((p) => [p.x * S, 0.35, -p.y * S] as [number, number, number]);
+  }, [route, lageVersion]);
   if (!tourId || !punkte) return null;
   const farbe = ctx.tag.touren.find((t) => t.id === tourId)!.farbe;
   const strich = Math.max(0.8, abstand / 70);

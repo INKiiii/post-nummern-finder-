@@ -44,6 +44,13 @@ const fps = (page) =>
       }),
   );
 
+/** Zeitleiste per Regler auf eine Uhrzeit (Minuten) stellen */
+const zeitStellen = (page, minuten) =>
+  page.locator('.regler').first().evaluate((el, v) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, String(v));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, minuten);
+
 try {
   for (const [name, opts] of [
     ['laptop', { viewport: { width: 1440, height: 900 } }],
@@ -52,17 +59,19 @@ try {
     const ctx = await browser.newContext(opts);
     const page = await ctx.newPage();
     let schritt = 'Start';
-    page.on('console', (m) => {
-      if (m.type() === 'error' || m.type() === 'warning') fehler.push(`[${name} · ${schritt}] ${m.type()}: ${m.text()}`);
-    });
-    page.on('pageerror', (e) => fehler.push(`[${name} · ${schritt}] pageerror: ${e.message}`));
+    const beobachten = (p, wer) => {
+      p.on('console', (m) => {
+        if (m.type() === 'error' || m.type() === 'warning') fehler.push(`[${name}/${wer} · ${schritt}] ${m.type()}: ${m.text()}`);
+      });
+      p.on('pageerror', (e) => fehler.push(`[${name}/${wer} · ${schritt}] pageerror: ${e.message}`));
+    };
+    beobachten(page, 'leitstand');
     const s = (x) => {
       schritt = x;
       console.log(`[${name}] ${x}`);
     };
     const schmal = name === 'iphone';
 
-    // 3D-Leitstand
     s('3D-Leitstand');
     await page.goto(`http://localhost:${port}/`);
     await page.waitForSelector('canvas', { timeout: 30000 });
@@ -75,52 +84,94 @@ try {
     await page.waitForTimeout(2200);
     await bild(page, `${name}-3d-basis`);
 
-    // Tour aus der Liste wählen → Fahrzeug-Panel, Kamera fliegt hin
+    s('Uhr läuft (Beladen)');
+    await zeitStellen(page, 7 * 60 + 18);
+    await page.waitForTimeout(1500);
+    await bild(page, `${name}-3d-beladen`);
+
+    s('Vormittag');
+    await zeitStellen(page, 10 * 60);
+    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: 'Menü' }).click();
+    await page.getByRole('button', { name: 'Ganze Karte' }).click();
+    await page.locator('button[aria-label="Start"]').first().click();
+    await page.waitForTimeout(2500);
+    await bild(page, `${name}-3d-vormittag`);
+
     s('Tour wählen');
+    if (schmal) await page.locator('.blatt-tabs button').first().click().catch(() => {});
     await page.locator('.tour-zeile:visible').nth(1).click();
     await page.waitForSelector('.panel .route');
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(2000);
     await bild(page, `${name}-3d-fahrzeug`);
+    const geschaetzt = await page.locator('.panel .marke.geschaetzt').count();
+    if (!geschaetzt) fehler.push(`[${name}] Fahrzeug-Panel zeigt keine Kennzeichnung „geschätzt“`);
 
-    // Klick in die Szene (Fahrzeug steht nach dem Flug in der Bildmitte)
-    s('Klick in Szene');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
-    // knapp unter das Label von Tour 2 klicken: dort steht das Fahrzeug
-    const label = await page.locator('.label-ebene .fahrzeug-label').nth(1).boundingBox();
-    await page.mouse.click(label.x + label.width / 2, label.y + label.height + (schmal ? 16 : 30));
-    await page.waitForTimeout(500);
-    const treffer = await page.locator('.panel .route').count();
-    if (!treffer) fehler.push(`[${name}] Klick auf das Fahrzeug in der Szene hat kein Panel geöffnet`);
+    s('Geräte-Ansicht');
+    const geraet = await ctx.newPage();
+    beobachten(geraet, 'gerät');
+    await geraet.goto(`http://localhost:${port}/#/fahrer/T2`);
+    await geraet.waitForSelector('.geraet-punkt.an', { timeout: 15000 });
+    await geraet.waitForTimeout(800);
+    await bild(geraet, `${name}-geraet`);
 
-    // Behälter aus der Ladung → Behälter-Panel
-    s('Behälter wählen');
-    await page.locator('.panel .chip:visible').first().click();
-    await page.waitForSelector('.panel .mengen');
-    await page.waitForTimeout(1800);
-    await bild(page, `${name}-3d-behaelter`);
+    s('Nachricht senden');
+    await page.bringToFront();
+    await page.locator('.panel .chip.text').first().click();
+    await geraet.waitForSelector('.geraet-meldung', { timeout: 10000 });
+    await bild(geraet, `${name}-geraet-nachricht`);
+    await geraet.getByRole('button', { name: 'Verstanden' }).click();
+    await page.waitForSelector('.nachrichten .gut', { timeout: 10000 });
+    await bild(page, `${name}-3d-bestaetigt`);
+    await geraet.close();
 
-    // Draufsicht
+    if (!schmal) {
+      s('Klick in Szene');
+      await page.locator('button[aria-label="Pause"]').first().click().catch(() => {});
+      await page.getByRole('button', { name: 'Basis zeigen' }).click();
+      await page.waitForTimeout(2000);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      // knapp unter das Label von Tour 1: steht noch an der Rampe? sonst egal
+      const labels = page.locator('.label-ebene .fahrzeug-label');
+      if (await labels.count()) {
+        const b = await labels.first().boundingBox();
+        if (b && b.y > 80) {
+          await page.mouse.click(b.x + b.width / 2, b.y + b.height + 30);
+          await page.waitForTimeout(500);
+        }
+      }
+    }
+
     s('Draufsicht');
-    if (schmal) await page.locator('.panel-kopf button:visible').click();
+    if (schmal && (await page.locator('.panel-kopf button:visible').count())) await page.locator('.panel-kopf button:visible').click();
     await page.getByRole('button', { name: 'Draufsicht' }).click();
     await page.waitForTimeout(1500);
     await bild(page, `${name}-3d-draufsicht`);
 
-    // Info und Datenschutz
+    if (schmal) {
+      s('Ereignisse (Handy)');
+      await page.locator('.blatt-tabs button', { hasText: 'Ereignisse' }).click();
+      await page.waitForTimeout(800);
+      await bild(page, `${name}-ereignisse`);
+    }
+
     s('Info');
     await page.getByRole('button', { name: 'Menü' }).click();
     await page.getByRole('button', { name: 'Info und Datenschutz' }).click();
     await page.waitForSelector('text=Datenschutz by Design');
-    await bild(page, `${name}-info`);
     await page.keyboard.press('Escape');
 
-    // 2D-Prüfansicht des Rechenkerns
+    s('Datenquellen');
+    await page.goto(`http://localhost:${port}/#/datenquellen`);
+    await page.waitForSelector('text=Keine neue Hardware');
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(out, `${name}-datenquellen.png`), fullPage: true });
+
     s('Rechenkern');
     await page.goto(`http://localhost:${port}/#/kern`);
-    await page.waitForSelector('.vorschlag', { timeout: 20000 });
-    await page.locator('.vorschlag .knopf.primaer').first().click();
-    await page.waitForTimeout(600);
+    await page.waitForSelector('.karte-svg', { timeout: 20000 });
+    await page.waitForTimeout(800);
     await bild(page, `${name}-kern`);
     await ctx.close();
   }
