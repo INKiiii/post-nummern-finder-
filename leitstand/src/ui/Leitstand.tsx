@@ -112,6 +112,7 @@ export function Leitstand() {
     setBlattOffen(!zielWahlAktiv);
   }, [zielWahlAktiv, schmal]);
 
+  const grob = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
   const { ctx, plan, auswertung: aus, startAuswertung: start, lage, prognose, zeit } = s;
   if (!ctx || !plan || !aus || !start || !lage) return <div className="laden">Lade Demo-Welt …</div>;
 
@@ -255,6 +256,20 @@ export function Leitstand() {
     <div className={`leitstand ${ereignisse && !schmal ? 'mit-ereignissen' : ''}`}>
       <Szene />
       <LabelEbene />
+
+      {(schmal || grob) && (
+        <div className={`zoom-knoepfe ${schmal ? 'schmal' : ''} ${demoAktiv ? 'mit-demo' : ''}`}>
+          <button className="knopf symbol" onClick={() => ansicht.zoomen(0.5)} aria-label="Hineinzoomen" title="Hineinzoomen">
+            +
+          </button>
+          <button className="knopf symbol" onClick={() => ansicht.zoomen(2)} aria-label="Herauszoomen" title="Herauszoomen">
+            −
+          </button>
+          <button className="knopf symbol" onClick={ganzeKarte} aria-label="Ganze Karte" title="Ganze Karte">
+            ⤢
+          </button>
+        </div>
+      )}
 
       <header className="ls-kopf glas">
         <div className="ls-titel">

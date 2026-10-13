@@ -48,6 +48,8 @@ interface AnsichtZustand {
   ziehen: { behaelterId: string; ziel: Auswahl } | null;
   /** kurze Meldung unten in der Mitte */
   hinweis: { text: string; nr: number } | null;
+  /** Zoom per Knopf (Handy): Abstand × faktor */
+  zoom: { faktor: number; nr: number } | null;
   /** Wunsch von außen (Demo): Vorschläge bzw. Szenarien rechts (Handy: im Blatt) zeigen */
   seitenWunsch: { ansicht: SeitenAnsicht; nr: number } | null;
 
@@ -64,6 +66,7 @@ interface AnsichtZustand {
   ziehenSetzen: (z: { behaelterId: string; ziel: Auswahl } | null) => void;
   hinweisSetzen: (text: string | null) => void;
   seiteZeigen: (ansicht: SeitenAnsicht) => void;
+  zoomen: (faktor: number) => void;
 }
 
 export type SeitenAnsicht = 'vorschlaege' | 'szenarien';
@@ -71,6 +74,7 @@ export type SeitenAnsicht = 'vorschlaege' | 'szenarien';
 let flugNr = 0;
 let hinweisNr = 0;
 let seitenNr = 0;
+let zoomNr = 0;
 
 export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   auswahl: null,
@@ -86,6 +90,7 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   ziehen: null,
   hinweis: null,
   seitenWunsch: null,
+  zoom: null,
 
   waehlen: (auswahl) => set({ auswahl, folgen: auswahl?.art === 'fahrzeug' && auswahl.id === get().folgen ? get().folgen : null }),
   hovern: (hover) => {
@@ -111,6 +116,7 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   },
   hinweisSetzen: (text) => set({ hinweis: text ? { text, nr: ++hinweisNr } : null }),
   seiteZeigen: (ansicht) => set({ auswahl: null, seitenWunsch: { ansicht, nr: ++seitenNr } }),
+  zoomen: (faktor) => set({ zoom: { faktor, nr: ++zoomNr } }),
   tippSetzen: (tipp) => {
     if (get().tipp !== tipp) set({ tipp });
   },

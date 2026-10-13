@@ -38,6 +38,7 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
   const flug = useAnsicht((s) => s.flug);
   const draufsicht = useAnsicht((s) => s.draufsicht);
+  const zoom = useAnsicht((s) => s.zoom);
   const welt = useLeitstand((s) => s.welt);
   const folgeVorher = useRef<{ x: number; z: number } | null>(null);
   /** Abstand Blickziel – verfolgtes Fahrzeug zu Beginn einer Bedienung */
@@ -87,6 +88,16 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
     const ziel = flug.versatz === false ? new Vector3(...flug.ziel) : versatzFuerBlatt(new Vector3(...flug.ziel), r, phi, theta);
     starte(ziel, r, phi, theta);
   }, [flug?.nr]);
+
+  // Zoom-Knöpfe (Handy): Abstand ändern, Blickziel und Richtung bleiben
+  useEffect(() => {
+    const c = ref.current;
+    if (!zoom || !c) return;
+    versatz.copy(camera.position).sub(c.target);
+    kugel.setFromVector3(versatz);
+    const r = MathUtils.clamp(kugel.radius * zoom.faktor, c.minDistance, c.maxDistance);
+    starte(c.target, r, kugel.phi, kugel.theta, 0.35);
+  }, [zoom?.nr]);
 
   useEffect(() => {
     const c = ref.current;

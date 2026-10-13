@@ -2703,3 +2703,34 @@ table.quellen td.nichts {
     display: none;
   }
 }
+
+/* ---- Zoom-Knöpfe (Touch) ------------------------------------------------------------ */
+
+.zoom-knoepfe {
+  position: absolute;
+  z-index: 7;
+  right: 10px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zoom-knoepfe.schmal {
+  bottom: auto;
+  top: calc(104px + env(safe-area-inset-top));
+}
+
+.zoom-knoepfe.schmal.mit-demo {
+  top: calc(240px + env(safe-area-inset-top));
+}
+
+.zoom-knoepfe .knopf {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  background: var(--flaeche);
+  box-shadow: var(--schatten);
+}
