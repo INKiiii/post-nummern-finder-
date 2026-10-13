@@ -28,6 +28,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   // Gebietsdaten: immer frisch aus dem Netz (werden in IndexedDB gespeichert).
   if (url.pathname.includes('/regions/')) return;
+  // Der Prototyp „Zustell-Leitstand 3D“ unter /leitstand/ ist eine eigene App.
+  if (url.pathname.includes('/leitstand/')) return;
   if (req.mode === 'navigate') {
     event.respondWith(
       caches.match('./', { ignoreSearch: true }).then((r) => r || fetch(req)),

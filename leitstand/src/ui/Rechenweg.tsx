@@ -36,7 +36,6 @@ export function WertKnopf({ children, rechenweg, className }: { children: ReactN
 
 export function RechenwegDialog() {
   const { rechenweg, schliessen } = useRechenwegDialog();
-  const annahmen = useLeitstand((s) => s.annahmen);
   useEffect(() => {
     if (!rechenweg) return;
     const taste = (e: KeyboardEvent) => e.key === 'Escape' && schliessen();
@@ -44,7 +43,6 @@ export function RechenwegDialog() {
     return () => window.removeEventListener('keydown', taste);
   }, [rechenweg, schliessen]);
   if (!rechenweg) return null;
-  const verwendet = [...new Set(rechenweg.zeilen.flatMap((z) => z.annahmen))];
   return (
     <div className="dialog-hintergrund" onClick={schliessen}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={rechenweg.titel} onClick={(e) => e.stopPropagation()}>
@@ -59,42 +57,53 @@ export function RechenwegDialog() {
             Schließen
           </button>
         </div>
-        <div className="formel">{rechenweg.formel}</div>
-        <div className="tabelle-huelle">
-          <table className="tabelle rechnung">
-            <tbody>
-              {rechenweg.zeilen.map((z, i) => (
-                <tr key={i} className={z.summe ? 'summe' : ''}>
-                  <td>{z.was}</td>
-                  <td className="leise zahlen">{z.rechnung}</td>
-                  <td className="r zahlen">{z.ergebnis}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {verwendet.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            <div className="leise" style={{ fontSize: 12, marginBottom: 4 }}>
-              Eingesetzte Annahmen (im Bereich „Annahmen“ änderbar):
-            </div>
-            <div className="chips">
-              {verwendet.map((k) => (
-                <span key={k} className="chip annahme">
-                  Annahme: {ANNAHMEN_INFO[k].label} = {annahmen[k].toLocaleString('de-DE')} {ANNAHMEN_INFO[k].einheit}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        {rechenweg.hinweise.length > 0 && (
-          <ul className="hinweise">
-            {rechenweg.hinweise.map((h, i) => (
-              <li key={i}>{h}</li>
-            ))}
-          </ul>
-        )}
+        <RechenwegInhalt rechenweg={rechenweg} />
       </div>
     </div>
+  );
+}
+
+/** Formel, Rechenzeilen, eingesetzte Annahmen und Hinweise (Dialog und Druckansicht) */
+export function RechenwegInhalt({ rechenweg }: { rechenweg: Rechenweg }) {
+  const annahmen = useLeitstand((s) => s.annahmen);
+  const verwendet = [...new Set(rechenweg.zeilen.flatMap((z) => z.annahmen))];
+  return (
+    <>
+      <div className="formel">{rechenweg.formel}</div>
+      <div className="tabelle-huelle">
+        <table className="tabelle rechnung">
+          <tbody>
+            {rechenweg.zeilen.map((z, i) => (
+              <tr key={i} className={z.summe ? 'summe' : ''}>
+                <td>{z.was}</td>
+                <td className="leise zahlen">{z.rechnung}</td>
+                <td className="r zahlen">{z.ergebnis}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {verwendet.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="leise" style={{ fontSize: 12, marginBottom: 4 }}>
+            Eingesetzte Annahmen (im Bereich „Annahmen“ änderbar):
+          </div>
+          <div className="chips">
+            {verwendet.map((k) => (
+              <span key={k} className="chip annahme">
+                Annahme: {ANNAHMEN_INFO[k].label} = {annahmen[k].toLocaleString('de-DE')} {ANNAHMEN_INFO[k].einheit}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {rechenweg.hinweise.length > 0 && (
+        <ul className="hinweise">
+          {rechenweg.hinweise.map((h, i) => (
+            <li key={i}>{h}</li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

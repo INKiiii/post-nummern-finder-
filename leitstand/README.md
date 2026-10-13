@@ -19,7 +19,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D), Übergaben am Treffpunkt | fertig |
 | 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | fertig |
 | 7 | Szenarien: Ausfall, Stau, Panne, Spitzentag | fertig |
-| 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
+| 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | fertig |
 
 ## Schnellstart
 
@@ -34,6 +34,62 @@ npm run test:browser # nach dem Build: Laptop- und iPhone-Größe, Konsolenfehle
 
 Die Startseite ist der **3D-Leitstand**. Die Prüfansicht des Rechenkerns (2D-Karte, Touren,
 Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
+
+| Adresse | Seite |
+|---|---|
+| `#/` | 3D-Leitstand |
+| `?demo` | 3D-Leitstand, die geführte Demo startet sofort (für Aufnahmen) |
+| `#/zahlen` | Idee in Zahlen (druckbar) |
+| `#/datenquellen` | Datenquellen: was der Leitstand braucht |
+| `#/fahrer` | Geräte-Ansicht der Fahrer/innen (eigenes Fenster) |
+| `#/kern` | Prüfansicht des Rechenkerns |
+
+### Online (GitHub Pages)
+
+Der Workflow „Bauen und veröffentlichen“ (`.github/workflows/deploy.yml`) baut den
+Leitstand bei jedem Push auf `main` mit und legt ihn unter **`/leitstand/`** neben die
+Hausnummern-App, also `https://<Konto>.github.io/<Repository>/leitstand/` (Demo direkt:
+`…/leitstand/?demo`). Auf anderen Zweigen prüft nur „Leitstand prüfen“ Typen, Tests und Build.
+
+## Geführte Demo (gut 2 Minuten)
+
+Oben **▶ Demo** (Handy: Menü ☰ → „Demo starten“) oder die Adresse mit `?demo`. Die Demo
+benutzt dieselben Aktionen wie die Bedienung von Hand; Untertitel erklären jeden Schritt.
+
+| # | Schritt | was man sieht |
+|---|---|---|
+| 1 | Überblick | normaler Tag, ganze Karte |
+| 2 | 07:00 Beladen | Behälter rollen nach dem Verladescan in die Fahrzeuge |
+| 3 | Unterwegs | Fahrzeuge mit Spuren, Häuser leuchten bei Zustellungen |
+| 4 | 10:00 Prognose | Tour 1 kommt zu spät zurück (Überstunden) |
+| 5 | Vorschlag | „Überlastung Tour 1 abbauen“ mit Übergabe, Vorschau in 3D |
+| 6 | Rechenweg | „Wie kommt die Zahl zustande?“ |
+| 7 | Übernehmen | Nachricht an beide Geräte, Bestätigung |
+| 8 | Übergabe | beide Fahrzeuge am Treffpunkt, der Behälter wechselt |
+| 9 | Panne | Tour 2 meldet eine Störung, „Panne auffangen“ mit Übergabe am Standort |
+| 10 | Idee in Zahlen | Ersparnis eines normalen Tages, Szenarien |
+| 11 | Datenschutz | keine neue Hardware, Mitbestimmung |
+
+Bedienung: **❚❚/▶** oder Leertaste hält an (auch die Uhr), **⏭** oder → springt zum nächsten
+Schritt, **✕** oder Esc beendet. Angehalten darf man sich umsehen und etwas antippen.
+Die Demo setzt den Tag auf den Startplan zurück. Fürs Video: Browser im Vollbild, `?demo`.
+
+## Idee in Zahlen (`#/zahlen`)
+
+Eine Seite mit allen Kennzahlen, live aus dem Rechenmodell (im Web Worker) mit den aktuellen
+Annahmen. Jede Euro-Zahl zeigt ihren Rechenweg. **Drucken / PDF** ergibt eine Einreichung
+mit Rechenweg der Hauptzahl im Anhang.
+
+* **Normaler Tag:** Startplan („historisch gewachsen“) gegen den Plan nach den Vorschlägen,
+  aufgeteilt nach Kostenart (Schicht, Überstunden, Kilometer, Fahrzeug). Dazu die Rechnung,
+  falls die frei gewordene Tour als Reserve im Dienst bleibt (nur Überstunden und Strecke).
+* **Die einzelnen Vorschläge** (überschneiden sich, nicht addierbar).
+* **Szenarien** je mit „ohne“ und „mit Leitstand“: Ausfall (auch gegen „Springer holen“),
+  Panne, Stau (was der Umweg kostet und dass die Prognose es sofort weiß), Spitzentag.
+  Sie zählen nicht zur Jahressumme.
+* **Hochrechnung** mit der Annahme „Zustellbasen“ (Standard 1) und dem klaren Hinweis, dass
+  Musterhausen erfunden ist und erst ein Pilot echte Werte liefert.
+* Was es braucht, Datenschutz, Vorschlag für einen Pilot, alle Annahmen zum Ändern.
 
 ### Bedienung der 3D-Szene
 
@@ -114,6 +170,7 @@ src/
     optimierer.ts   Zuordnung Behälter → Tour und Reihenfolge
     vorschlaege.ts  Vorschläge und „Andere Tour“
     rechenweg.ts    „Wie kommt die Zahl zustande?“
+    ideeInZahlen.ts Kennzahlen für die Seite „Idee in Zahlen“ (Alltag und Szenarien)
     quellen.ts      Schnittstellen TourDataSource, ScanQuelle, VehiclePositionSource, FahrerGeraet
     scan.ts         Scan-Ereignisse (Arten, Herkunft)
     simulation.ts   Adapter „SimulierteScanner“: erzeugt nur Scan-Ereignisse
@@ -130,6 +187,7 @@ src/
   geraet/           Übertragung zum Fahrergerät (BroadcastChannel)
   ui/               Oberfläche: Leitstand, Panels, Ereignisstrom, Datenquellen,
                     Umplanen (umplanen/: Vorschau, Andere Tour, Tauschen),
+                    Idee in Zahlen, geführte Demo (demo/: Regie, Drehbuch, Untertitel),
                     Geräte-Ansicht (fahrer/), Beschriftungen, Prüfansicht
 tests/              Vitest
 ```
@@ -232,6 +290,17 @@ Umladen die üblichen Scans im übernehmenden Fahrzeug (`BEHAELTER_VERLADEN` mit
 sonst die `PAKET_IN_FAHRZEUG`-Scans der Pakete). Daran erkennt das Lagebild, dass die
 Übergabe stattgefunden hat – es gibt dafür kein eigenes Ereignis und keine neue Hardware.
 
+### So testest du Phase 8
+
+1. `npm run dev`, oben **▶ Demo**. Die Demo läuft gut 2 Minuten von 07:00 bis zur Seite
+   „Idee in Zahlen“. Leertaste hält an (die Uhr steht), → springt weiter, Esc beendet.
+2. Am iPhone: Menü ☰ → „Demo starten“; der Untertitel steht oben, das Blatt unten.
+3. Menü ☰ → **Idee in Zahlen**: Euro-Zahlen antippen (Rechenweg). Unten bei den Annahmen den
+   Stundensatz ändern → alle Zahlen rechnen neu. „Zustellbasen“ auf 10 → Hochrechnung.
+4. **Drucken / PDF**: Szenarien je eine Karte, am Ende der Rechenweg der Hauptzahl.
+5. Bei einem Szenario **Im 3D-Leitstand abspielen** → das Szenario startet im Leitstand.
+6. Nach dem Merge auf `main`: `https://<Konto>.github.io/<Repository>/leitstand/?demo`.
+
 ### So testest du Phase 7
 
 1. `npm run dev`, oben **Szenarien** → „Zusteller fällt aus“ (Tour 3) → Starten. Links steht
@@ -305,6 +374,7 @@ Alle Parameter stehen in `src/config.ts`, sind im UI als **Annahme** markiert un
 | Fahrzeug fix | 25 €/Tag |
 | Schicht | 8 h |
 | Zustelltage | 300 im Jahr |
+| Zustellbasen (nur Hochrechnung) | 1 |
 
 Jede Euro-Zahl im UI ist anklickbar und zeigt den Rechenweg mit den eingesetzten Werten.
 

@@ -21,6 +21,7 @@ export const STANDARD_ANNAHMEN = {
   fahrzeugFixProTag: 25,
   // Hochrechnung
   zustelltageProJahr: 300,
+  zustellbasen: 1,
   // Ablauf bei Umplanung und Szenarien
   uebergabeMin: 10,
   springerVorlaufMin: 60,
@@ -63,6 +64,15 @@ export const ANNAHMEN_INFO: Record<AnnahmeSchluessel, AnnahmeInfo> = {
   euroProKm: { label: 'Kosten je km', einheit: '€/km', gruppe: 'Kosten', min: 0, max: 2, schritt: 0.01 },
   fahrzeugFixProTag: { label: 'Fahrzeug fix je Tag', einheit: '€', gruppe: 'Kosten', min: 0, max: 200, schritt: 1 },
   zustelltageProJahr: { label: 'Zustelltage im Jahr', einheit: 'Tage', gruppe: 'Hochrechnung', min: 1, max: 366, schritt: 1 },
+  zustellbasen: {
+    label: 'Zustellbasen',
+    einheit: 'Basen',
+    gruppe: 'Hochrechnung',
+    min: 1,
+    max: 1000,
+    schritt: 1,
+    hinweis: 'Nur für die Hochrechnung auf der Seite „Idee in Zahlen“. Musterhausen ist erfunden; ob echte Basen ähnlich viel Spielraum haben, muss ein Pilot zeigen.',
+  },
   uebergabeMin: { label: 'Dauer einer Übergabe', einheit: 'Min', gruppe: 'Ablauf', min: 0, max: 60, schritt: 1 },
   springerVorlaufMin: {
     label: 'Vorlauf Springer',

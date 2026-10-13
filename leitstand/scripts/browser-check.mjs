@@ -345,6 +345,57 @@ try {
       await page.waitForTimeout(800);
       if (await page.locator('.szenario-chip').count()) fehler.push(`[${name}] Szenario lässt sich nicht beenden`);
 
+      s('Demo');
+      if (schmal) {
+        await page.getByRole('button', { name: 'Menü' }).click();
+        await page.getByRole('button', { name: /Demo starten/ }).click();
+      } else await page.getByRole('button', { name: '▶ Demo' }).click();
+      await page.waitForSelector('.demo-karte');
+      const marke = () => page.locator('.demo-marke').innerText();
+      if (!/1\/11/.test(await marke())) fehler.push(`[${name}] Demo: beginnt nicht mit Schritt 1 („${await marke()}“)`);
+      // Pause hält auch die Uhr an
+      await page.waitForTimeout(800);
+      await page.getByRole('button', { name: 'Demo anhalten' }).click();
+      const z1 = await page.evaluate(() => window.__leitstand.getState().zeit);
+      await page.waitForTimeout(1200);
+      if ((await page.evaluate(() => window.__leitstand.getState().zeit)) !== z1) fehler.push(`[${name}] Demo: Uhr läuft in der Pause weiter`);
+      await page.getByRole('button', { name: 'Demo fortsetzen' }).click();
+      // Schritt für Schritt überspringen; bei der Vorschau und der Übergabe kurz zusehen
+      for (let i = 0; i < 14; i++) {
+        const m = await marke();
+        if (!/\d+\/11/.test(m)) break;
+        const nr = Number(m.match(/(\d+)\/11/)[1]);
+        if (nr === 5) {
+          await page.waitForSelector('.vorschau-karte', { timeout: 15000 }).catch(() => fehler.push(`[${name}] Demo: keine Vorschau in Schritt 5`));
+          await bild(page, `${name}-demo-vorschau`);
+        } else if (nr === 8) {
+          await page.waitForTimeout(2500);
+          await bild(page, `${name}-demo-uebergabe`);
+        } else await page.waitForTimeout(1200);
+        await page.getByRole('button', { name: 'Nächster Schritt' }).click();
+        await page.waitForFunction((alt) => document.querySelector('.demo-marke')?.textContent !== alt, m, { timeout: 30000 });
+      }
+      await page.waitForSelector('text=Ende der Demo', { timeout: 30000 });
+      if (!(await page.evaluate(() => location.hash)).includes('zahlen')) fehler.push(`[${name}] Demo: endet nicht auf „Idee in Zahlen“`);
+      await bild(page, `${name}-demo-ende`);
+      await page.getByRole('button', { name: 'Schließen' }).click();
+      if (await page.locator('.demo-karte').count()) fehler.push(`[${name}] Demo lässt sich nicht schließen`);
+
+      s('Idee in Zahlen');
+      await page.goto(`http://localhost:${port}/#/zahlen`);
+      await page.waitForSelector('.zahlen-held', { timeout: 30000 });
+      const held = await page.locator('.zahlen-held .ergebnis-gross').innerText();
+      if (!/\d.*€/.test(held)) fehler.push(`[${name}] Idee in Zahlen: keine Jahreszahl („${held}“)`);
+      if ((await page.locator('.szenario-zahlen').count()) !== 4) fehler.push(`[${name}] Idee in Zahlen: nicht 4 Szenarien`);
+      await page.locator('.zahlen-held .wert-knopf').click();
+      await page.waitForSelector('.dialog');
+      await page.keyboard.press('Escape');
+      const breite = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      if (breite > 1) fehler.push(`[${name}] Idee in Zahlen: Seite ${breite}px zu breit`);
+      await page.screenshot({ path: path.join(out, `${name}-zahlen.png`), fullPage: !schmal });
+      await page.goto(`http://localhost:${port}/?debug#/`);
+      await page.waitForSelector('canvas', { timeout: 30000 });
+
       s('Info');
       await page.getByRole('button', { name: 'Menü' }).click();
       await page.getByRole('button', { name: 'Info und Datenschutz' }).click();

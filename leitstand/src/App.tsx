@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useLeitstand } from './state/store';
 import { Datenquellen } from './ui/Datenquellen';
+import { IdeeInZahlen } from './ui/IdeeInZahlen';
 import { ScannerApp } from './ui/fahrer/ScannerApp';
 import { KernAnsicht } from './ui/KernAnsicht';
+import { DemoOverlay, demoLos } from './ui/demo/DemoOverlay';
 import { Leitstand } from './ui/Leitstand';
 import { RechenwegDialog } from './ui/Rechenweg';
 import { useSimulationsTakt } from './ui/takt';
@@ -29,14 +31,21 @@ export function App() {
 
 function LeitstandFenster({ hash }: { hash: string }) {
   const laden = useLeitstand((s) => s.laden);
+  const geladen = useLeitstand((s) => !!s.welt);
   useEffect(() => {
     void laden();
   }, [laden]);
   useSimulationsTakt();
+  // ?demo startet die geführte Demo gleich nach dem Laden (z. B. für eine Aufnahme)
+  useEffect(() => {
+    if (geladen && new URLSearchParams(window.location.search).has('demo')) demoLos();
+  }, [geladen]);
+  const leitstand = hash === '' || hash === '#/' || hash === '#';
   return (
     <>
-      {hash === '#/kern' ? <KernAnsicht /> : hash === '#/datenquellen' ? <Datenquellen /> : <Leitstand />}
+      {hash === '#/kern' ? <KernAnsicht /> : hash === '#/datenquellen' ? <Datenquellen /> : hash === '#/zahlen' ? <IdeeInZahlen /> : <Leitstand />}
       <RechenwegDialog />
+      <DemoOverlay unten={!leitstand} />
     </>
   );
 }

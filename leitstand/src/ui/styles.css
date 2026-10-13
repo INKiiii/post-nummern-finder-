@@ -2334,3 +2334,372 @@ table.quellen td.nichts {
   --tourfarbe: #d9534f;
   color: #b42318;
 }
+
+/* ---- Seite „Idee in Zahlen“ ------------------------------------------------------------ */
+
+.zahlen-held .ergebnis-gross {
+  font-size: 32px;
+  margin: 4px 0 6px;
+}
+
+.zahlen-held .wert-knopf {
+  color: inherit;
+  font-size: inherit;
+}
+
+.zahlen-kennzahlen {
+  margin-top: 16px;
+}
+
+.zahlen-seite .kennzahl {
+  background: var(--flaeche);
+}
+
+.zahlen-seite .kennzahl .wert {
+  font-size: 19px;
+}
+
+.zahlen-seite .tabelle tr.summe td {
+  font-weight: 700;
+  border-top: 2px solid var(--text);
+}
+
+.zahlen-seite ol.liste,
+.zahlen-seite ul.liste {
+  margin: 8px 0 8px;
+  padding-left: 20px;
+  font-size: 14px;
+}
+
+.zahlen-seite ol.liste li + li {
+  margin-top: 6px;
+}
+
+.seiten-ueberschrift {
+  font-size: 18px;
+  margin: 28px 0 6px;
+}
+
+.szenario-raster,
+.zahlen-zwei {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 12px 0 16px;
+}
+
+.seite-inhalt .szenario-raster > .karte,
+.seite-inhalt .zahlen-zwei > .karte {
+  margin-top: 0;
+}
+
+@media (max-width: 820px) {
+  .szenario-raster,
+  .zahlen-zwei {
+    grid-template-columns: 1fr;
+  }
+}
+
+.szenario-zahlen {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.szenario-zahlen h3 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.szenario-zahlen .art {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.szenario-zahlen > button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.vergleich-spalten {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.variante {
+  border: 1px solid var(--rand);
+  border-radius: var(--radius-klein);
+  padding: 8px 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.variante + .variante {
+  border-color: color-mix(in srgb, var(--gut) 45%, var(--rand));
+  background: color-mix(in srgb, var(--gut) 5%, var(--flaeche));
+}
+
+.variante > .leise {
+  min-height: 2.8em;
+  margin: 2px 0 6px;
+}
+
+.variante dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 0;
+}
+
+.variante dt {
+  color: var(--textLeise);
+}
+
+.variante dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.szenario-zahlen .kern {
+  font-weight: 600;
+  margin: 8px 0 2px;
+  font-size: 14px;
+}
+
+.szenario-zahlen p {
+  margin: 4px 0;
+}
+
+.szenario-delta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid var(--rand);
+  padding-top: 8px;
+  margin: 6px 0;
+}
+
+.hochrechnung .annahme-zeile {
+  max-width: 340px;
+  margin-bottom: 10px;
+}
+
+.zahlen-seite .fusszeile {
+  text-align: center;
+  margin: 20px 0 8px;
+}
+
+.nur-druck {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .zahlen-held .ergebnis-gross {
+    font-size: 26px;
+  }
+  .variante {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+  }
+  body {
+    font-size: 12px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .kopf {
+    position: static;
+    border: 0;
+    padding: 0 0 8px;
+  }
+  .kopf .aktionen,
+  .nicht-drucken,
+  .dialog-hintergrund,
+  .zahlen-seite button:not(.wert-knopf) {
+    display: none !important;
+  }
+  .seite-inhalt {
+    max-width: none;
+    padding: 0;
+  }
+  .karte,
+  .kennzahl,
+  .ergebnis-box {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+  .wert-knopf {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .szenario-raster {
+    grid-template-columns: 1fr;
+  }
+  .zahlen-zwei {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .seiten-ueberschrift {
+    break-after: avoid;
+  }
+  .annahme-zeile input {
+    border: 0;
+    padding: 0;
+    background: none;
+  }
+  .nur-druck {
+    display: block;
+    break-before: page;
+  }
+}
+
+.variante .wert-knopf {
+  padding: 0;
+}
+
+@media (min-width: 821px) {
+  .annahmen-spalten > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 32px;
+  }
+  .annahmen-spalten .annahmen-gruppe + .annahmen-gruppe {
+    margin-top: 0;
+  }
+  .annahmen-spalten > div > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .seite .kopf {
+    position: static;
+  }
+  .zahlen-seite .tabelle .breit {
+    display: none;
+  }
+}
+
+/* ---- Geführte Demo ----------------------------------------------------------------- */
+
+.demo-ebene {
+  position: fixed;
+  z-index: 60;
+  top: calc(76px + env(safe-area-inset-top));
+  left: 330px;
+  right: 390px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.demo-ebene.unten {
+  top: auto;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 16px;
+  right: 16px;
+}
+
+.demo-karte {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 600px;
+  border-radius: var(--radius);
+  padding: 10px 14px 12px;
+  border: 1px solid var(--rand);
+  box-shadow: 0 8px 30px rgba(20, 30, 45, 0.22);
+}
+
+.demo-ebene.unten .demo-karte {
+  background: var(--flaeche);
+}
+
+.demo-kopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.demo-marke {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--akzent);
+}
+
+.demo-knoepfe {
+  display: flex;
+  gap: 6px;
+}
+
+.demo-karte h3 {
+  font-size: 17px;
+  margin: 4px 0 2px;
+}
+
+.demo-karte p {
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.demo-balken {
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--akzent) 15%, transparent);
+  overflow: hidden;
+}
+
+.demo-balken span {
+  display: block;
+  height: 100%;
+  background: var(--akzent);
+  transition: width 0.12s linear;
+}
+
+.demo-pause {
+  margin-top: 6px;
+}
+
+@media (max-width: 819px) {
+  .demo-ebene:not(.unten) {
+    top: calc(64px + env(safe-area-inset-top));
+    left: 8px;
+    right: 8px;
+  }
+  .demo-karte {
+    padding: 8px 10px 10px;
+  }
+  .demo-karte h3 {
+    font-size: 15px;
+  }
+  .demo-karte p {
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+}
+
+@media print {
+  .demo-ebene {
+    display: none;
+  }
+}

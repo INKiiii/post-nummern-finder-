@@ -18,6 +18,8 @@ import { Balken } from './panels/Gemeinsam';
 import { SzenarienPanel } from './panels/SzenarienPanel';
 import { VorschlaegePanel } from './panels/VorschlaegePanel';
 import { Hinweise } from './umplanen/Hinweise';
+import { demoLos } from './demo/DemoOverlay';
+import { useDemo } from './demo/regie';
 import { VorschauKarte } from './umplanen/VorschauKarte';
 import { WertKnopf } from './Rechenweg';
 import { useZeitTasten } from './takt';
@@ -58,6 +60,7 @@ export function Leitstand() {
   const [blattTab, setBlattTab] = useState<'touren' | 'vorschlaege' | 'ereignisse' | 'szenarien'>('touren');
   const [rechtsAnsicht, setRechtsAnsicht] = useState<'vorschlaege' | 'szenarien' | null>(null);
   const vorschlaegeOffen = rechtsAnsicht === 'vorschlaege';
+  const demoAktiv = useDemo((d) => d.aktiv);
   useZeitTasten();
   const [ereignisse, setEreignisseRoh] = useState(ereignisseAnfangs);
   const setEreignisse = (an: boolean) => {
@@ -91,6 +94,16 @@ export function Leitstand() {
   useEffect(() => {
     if (ansicht.auswahl) setBlattOffen(true);
   }, [ansicht.auswahl]);
+
+  // Wunsch von außen (Demo): Vorschläge oder Szenarien zeigen
+  const seitenWunsch = ansicht.seitenWunsch;
+  useEffect(() => {
+    if (!seitenWunsch) return;
+    if (schmal) {
+      setBlattTab(seitenWunsch.ansicht);
+      setBlattOffen(true);
+    } else setRechtsAnsicht(seitenWunsch.ansicht);
+  }, [seitenWunsch, schmal]);
 
   // Handy: zum Antippen des Ziel-Fahrzeugs das Blatt einklappen, danach wieder öffnen
   const zielWahlAktiv = !!ansicht.zielWahl;
@@ -275,6 +288,9 @@ export function Leitstand() {
           <button className="knopf" onClick={basisZeigen}>
             Basis zeigen
           </button>
+          <button className="knopf nur-breit demo-start" onClick={demoLos} disabled={demoAktiv} title="Geführte Demo, gut 2 Minuten">
+            ▶ Demo
+          </button>
           <button
             className={`knopf nur-breit ${rechtsAnsicht === 'szenarien' && !panel ? 'an' : ''}`}
             onClick={() => (rechtsAnsicht === 'szenarien' && !panel ? setRechtsAnsicht(null) : szenarienZeigen())}
@@ -304,6 +320,10 @@ export function Leitstand() {
             </button>
             {menue && (
               <div className="menue glas" onClick={() => setMenue(false)}>
+                <button onClick={demoLos} disabled={demoAktiv}>
+                  ▶ Demo starten (geführt, gut 2 Minuten)
+                </button>
+                <a href="#/zahlen">Idee in Zahlen: was der Leitstand bringt</a>
                 <a href="#/datenquellen">Datenquellen: was der Leitstand braucht</a>
                 <a href="#/fahrer" target="_blank" rel="noreferrer">
                   Geräte-Ansicht (Fahrer) in neuem Fenster

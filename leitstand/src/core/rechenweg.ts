@@ -195,3 +195,99 @@ export function rechenwegErsparnis(ctx: Kontext, alt: PlanAuswertung, neu: PlanA
     hinweise,
   };
 }
+
+export type Kostenart = 'schicht' | 'ueberstunden' | 'km' | 'fahrzeug';
+
+export const KOSTENARTEN: Kostenart[] = ['schicht', 'ueberstunden', 'km', 'fahrzeug'];
+
+export const KOSTENART_NAME: Record<Kostenart, string> = {
+  schicht: 'Schichten (voll bezahlt)',
+  ueberstunden: 'Überstunden',
+  km: 'Kilometer',
+  fahrzeug: `${G.fahrzeug} fix`,
+};
+
+const KOSTENART_FORMEL: Record<Kostenart, string> = {
+  schicht: `Schichtkosten = aktive ${G.touren} × Schichtlänge × Stundensatz`,
+  ueberstunden: 'Überstundenkosten = Überstunden × Stundensatz × (1 + Zuschlag)',
+  km: 'Kilometerkosten = Strecke × Kosten je km',
+  fahrzeug: `${G.fahrzeug}kosten = aktive ${G.touren} × Fixkosten je Tag`,
+};
+
+/** eine Kostenart eines Plans als Rechenzeile */
+function kostenZeile(ctx: Kontext, art: Kostenart, name: string, p: PlanAuswertung): RechenZeile {
+  const a = ctx.annahmen;
+  const s = p.summe;
+  switch (art) {
+    case 'schicht':
+      return { was: name, rechnung: `${s.aktiveTouren} × ${wert(a, 'schichtStunden')} × ${wert(a, 'stundensatz')}`, ergebnis: fmtEuro(s.kosten.schicht), annahmen: ['schichtStunden', 'stundensatz'] };
+    case 'ueberstunden':
+      return {
+        was: name,
+        rechnung: `${fmtZahl(s.ueberstundenMin / 60, 2)} h × ${wert(a, 'stundensatz')} × ${fmtZahl(1 + a.ueberstundenZuschlagProzent / 100, 2)}`,
+        ergebnis: fmtEuro(s.kosten.ueberstunden),
+        annahmen: ['stundensatz', 'ueberstundenZuschlagProzent'],
+      };
+    case 'km':
+      return { was: name, rechnung: `${fmtKm(s.km)} × ${fmtEuro(a.euroProKm)}/km`, ergebnis: fmtEuro(s.kosten.km), annahmen: ['euroProKm'] };
+    case 'fahrzeug':
+      return { was: name, rechnung: `${s.aktiveTouren} × ${wert(a, 'fahrzeugFixProTag')}`, ergebnis: fmtEuro(s.kosten.fahrzeug), annahmen: ['fahrzeugFixProTag'] };
+  }
+}
+
+function jahresZeilen(ctx: Kontext, tag: number, links: string): RechenZeile[] {
+  const a = ctx.annahmen;
+  return [
+    { was: 'Ersparnis je Tag', rechnung: links, ergebnis: fmtEuro(tag), annahmen: [], summe: true },
+    { was: 'Ersparnis je Jahr', rechnung: `${fmtEuro(tag)} × ${wert(a, 'zustelltageProJahr')}`, ergebnis: fmtEuro(tag * a.zustelltageProJahr), annahmen: ['zustelltageProJahr'], summe: true },
+  ];
+}
+
+/** Ersparnis bei einer Kostenart (z. B. nur Kilometer) zwischen zwei Plänen */
+export function rechenwegKostenart(ctx: Kontext, art: Kostenart, alt: PlanAuswertung, neu: PlanAuswertung, namen: [string, string]): Rechenweg {
+  const x = alt.summe.kosten[art];
+  const y = neu.summe.kosten[art];
+  return {
+    titel: `Ersparnis ${KOSTENART_NAME[art]}`,
+    formel: KOSTENART_FORMEL[art],
+    zeilen: [kostenZeile(ctx, art, namen[0], alt), kostenZeile(ctx, art, namen[1], neu), ...jahresZeilen(ctx, x - y, `${fmtEuro(x)} − ${fmtEuro(y)}`)],
+    hinweise: ['Beispielrechnung mit erfundenen Daten und den angezeigten Annahmen.'],
+  };
+}
+
+/** Ersparnis, wenn die frei gewordene Tour als Reserve im Dienst bleibt: nur Überstunden und Kilometer */
+export function rechenwegOhneTourEinsparung(ctx: Kontext, alt: PlanAuswertung, neu: PlanAuswertung): Rechenweg {
+  const ue = alt.summe.kosten.ueberstunden - neu.summe.kosten.ueberstunden;
+  const km = alt.summe.kosten.km - neu.summe.kosten.km;
+  return {
+    titel: 'Ersparnis, wenn die freie Tour bleibt',
+    formel: 'Ersparnis = weniger Überstunden + weniger Kilometer (Schicht und Fahrzeug bleiben)',
+    zeilen: [
+      { was: 'Überstunden', rechnung: `${fmtEuro(alt.summe.kosten.ueberstunden)} − ${fmtEuro(neu.summe.kosten.ueberstunden)}`, ergebnis: fmtEuro(ue), annahmen: ['stundensatz', 'ueberstundenZuschlagProzent'] },
+      { was: 'Kilometer', rechnung: `${fmtEuro(alt.summe.kosten.km)} − ${fmtEuro(neu.summe.kosten.km)}`, ergebnis: fmtEuro(km), annahmen: ['euroProKm'] },
+      ...jahresZeilen(ctx, ue + km, `${fmtEuro(ue)} + ${fmtEuro(km)}`),
+    ],
+    hinweise: [
+      `Gilt, wenn die frei gewordene ${G.tour} weiter bezahlt wird, z. B. als Reserve für Ausfälle und Spitzentage.`,
+      'Beispielrechnung mit erfundenen Daten und den angezeigten Annahmen.',
+    ],
+  };
+}
+
+/** Hochrechnung auf mehrere Zustellbasen (linear, jede Basis wie die Demo-Basis) */
+export function rechenwegHochrechnung(ctx: Kontext, d: Delta): Rechenweg {
+  const a = ctx.annahmen;
+  return {
+    titel: 'Hochrechnung',
+    formel: 'Ersparnis = Ersparnis je Tag × Zustelltage × Zustellbasen',
+    zeilen: [
+      { was: `Ersparnis je Tag (${ctx.welt.name})`, rechnung: 'Startplan − Plan mit Leitstand', ergebnis: fmtEuro(d.euroTag), annahmen: [] },
+      { was: 'Ersparnis je Jahr und Basis', rechnung: `${fmtEuro(d.euroTag)} × ${wert(a, 'zustelltageProJahr')}`, ergebnis: fmtEuro(d.euroJahr), annahmen: ['zustelltageProJahr'] },
+      { was: 'Hochrechnung', rechnung: `${fmtEuro(d.euroJahr)} × ${wert(a, 'zustellbasen')}`, ergebnis: fmtEuro(d.euroJahr * a.zustellbasen), annahmen: ['zustellbasen'], summe: true },
+    ],
+    hinweise: [
+      `${ctx.welt.name} ist erfunden. Die Hochrechnung nimmt an, dass jede Basis so viel Spielraum hat wie die Demo-Basis – das muss ein Pilot mit echten Daten zeigen.`,
+      'Beispielrechnung mit erfundenen Daten und den angezeigten Annahmen.',
+    ],
+  };
+}

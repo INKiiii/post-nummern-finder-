@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { TEMPI, simUhr, useLeitstand } from '../state/store';
+import { useDemo } from './demo/regie';
 
 /** Treibt die Simulationsuhr an (nur im Leitstand-Fenster) */
 export function useSimulationsTakt(): void {
@@ -25,6 +26,8 @@ export function useZeitTasten(): void {
   useEffect(() => {
     const taste = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // während der Demo gehören die Tasten der Demo
+      if (useDemo.getState().aktiv) return;
       const ziel = e.target as HTMLElement | null;
       if (ziel?.closest('input, textarea, select, [contenteditable="true"]')) return;
       const s = useLeitstand.getState();

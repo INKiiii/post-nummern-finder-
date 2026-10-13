@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import { standardAnnahmen, type Annahmen, type AnnahmeSchluessel } from '../config';
 import { uebergabeZeiten, umplanungsNachrichten, type UmplanungsNachricht } from '../core/benachrichtigung';
 import { DemoTourDataSource } from '../core/demoQuelle';
+import type { IdeeInZahlen } from '../core/ideeInZahlen';
 import { Lagebild, zusammenfuehren } from '../core/lagebild';
 import { bewertePlan, erstelleKontext, vergleiche, type Delta, type Kontext, type PlanAuswertung } from '../core/modell';
 import type { FahrerNachricht, TourDataSource } from '../core/quellen';
@@ -118,6 +119,9 @@ interface LeitstandZustand {
   fahrerSimulieren: boolean;
   /** laufendes Szenario (null = normaler Tag) */
   szenario: AktivesSzenario | null;
+  /** Kennzahlen für die Seite „Idee in Zahlen“ (im Worker berechnet) */
+  zahlen: IdeeInZahlen | null;
+  zahlenLaden: boolean;
 
   laden: (quelle?: TourDataSource) => Promise<void>;
   planSetzen: (plan: Plan, label: string) => void;
@@ -149,10 +153,15 @@ interface LeitstandZustand {
   szenarioBeenden: () => Promise<void>;
   /** Welche Nachrichten bekäme jede Tour, wenn `neu` den aktuellen Tagesplan ersetzt? */
   nachrichtenFuer: (neu: Plan, neuAus: PlanAuswertung | null) => UmplanungsNachricht[];
+  /** „Idee in Zahlen“ mit den aktuellen Annahmen (neu) berechnen */
+  zahlenAnfordern: () => void;
 }
 
 let kern: KernClient | null = null;
 let vorschlagAnfrage = 0;
+let zahlenAnfrage = 0;
+/** Annahmen der letzten Berechnung von „Idee in Zahlen“ */
+let zahlenSchluessel = '';
 let vorschlagTimer: ReturnType<typeof setTimeout> | null = null;
 let sim: SimulierteScanner | null = null;
 let geraet: BroadcastFahrerGeraet | null = null;
@@ -405,6 +414,8 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     vorschau: null,
     fahrerSimulieren: true,
     szenario: null,
+    zahlen: null,
+    zahlenLaden: false,
 
     laden: async (quelle = new DemoTourDataSource()) => {
       const { welt, tag, plan } = await quelle.ladeTag();
@@ -635,6 +646,21 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       const { tag, plan } = await new DemoTourDataSource().ladeTag();
       set({ szenario: null });
       tagSetzen(tag, plan);
+    },
+
+    zahlenAnfordern: () => {
+      const { annahmen, zahlen } = get();
+      if (!kern) return;
+      // die Zahl der Basen ändert nur die Hochrechnung auf der Seite, nicht die Rechnung
+      const schluessel = JSON.stringify({ ...annahmen, zustellbasen: 0 });
+      if (schluessel === zahlenSchluessel && zahlen) return;
+      zahlenSchluessel = schluessel;
+      const nr = ++zahlenAnfrage;
+      set({ zahlenLaden: true });
+      kern.zahlen(annahmen).then(
+        (z) => nr === zahlenAnfrage && set({ zahlen: z, zahlenLaden: false }),
+        (e) => nr === zahlenAnfrage && set({ zahlenLaden: false, fehler: String(e) }),
+      );
     },
 
     nachrichtenFuer: (neu, neuAus) => {

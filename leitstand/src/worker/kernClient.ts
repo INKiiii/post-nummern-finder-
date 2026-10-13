@@ -1,3 +1,5 @@
+import type { Annahmen } from '../config';
+import type { IdeeInZahlen } from '../core/ideeInZahlen';
 import type { OptimiererOptionen } from '../core/optimierer';
 import type { Plan, Welt } from '../core/types';
 import type { Vorschlag } from '../core/vorschlaege';
@@ -39,6 +41,10 @@ export class KernClient {
 
   optimiere(eingabe: KernEingabe, optionen: OptimiererOptionen = {}): Promise<Plan> {
     return this.senden({ art: 'optimiere', eingabe, optionen });
+  }
+
+  zahlen(annahmen: Annahmen): Promise<IdeeInZahlen> {
+    return this.senden({ art: 'zahlen', annahmen });
   }
 
   beenden(): void {

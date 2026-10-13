@@ -3,6 +3,7 @@
  * Rechenkern im Web Worker: Optimierung und Vorschläge laufen hier, damit die 3D-Szene
  * flüssig bleibt.
  */
+import { berechneIdeeInZahlen } from '../core/ideeInZahlen';
 import { erstelleKontext } from '../core/modell';
 import { optimiere } from '../core/optimierer';
 import type { Welt } from '../core/types';
@@ -30,6 +31,10 @@ self.onmessage = (ev: MessageEvent<{ id: number; anfrage: Anfrage }>) => {
         break;
       case 'optimiere':
         ergebnis = optimiere(kontext(anfrage.eingabe), anfrage.eingabe.plan, anfrage.optionen);
+        break;
+      case 'zahlen':
+        if (!welt) throw new Error('Welt fehlt');
+        ergebnis = berechneIdeeInZahlen(welt, anfrage.annahmen);
         break;
     }
     antwort = { id, ok: true, ergebnis };

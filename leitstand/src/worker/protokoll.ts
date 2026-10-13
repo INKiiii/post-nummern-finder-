@@ -11,6 +11,7 @@ export interface KernEingabe {
 export type Anfrage =
   | { art: 'welt'; welt: Welt }
   | { art: 'vorschlaege'; eingabe: KernEingabe; wiederkehrend: boolean }
-  | { art: 'optimiere'; eingabe: KernEingabe; optionen: OptimiererOptionen };
+  | { art: 'optimiere'; eingabe: KernEingabe; optionen: OptimiererOptionen }
+  | { art: 'zahlen'; annahmen: Annahmen };
 
 export type Antwort = { id: number; ok: true; ergebnis: unknown } | { id: number; ok: false; fehler: string };
