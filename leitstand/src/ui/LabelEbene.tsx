@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo } from 'react';
+import { memo, useLayoutEffect, useMemo } from 'react';
 import { G } from '../glossar';
 import { fmtDauer, fmtUhr } from '../core/format';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
@@ -9,10 +9,14 @@ import { S } from '../szene/koord';
 import { halleMitte } from '../szene/layout';
 
 /** Alle Beschriftungen der Szene als DOM-Ebene über dem Canvas */
-export function LabelEbene() {
-  const { ctx, lage, zeit } = useLeitstand();
+export const LabelEbene = memo(function LabelEbene() {
+  const ctx = useLeitstand((s) => s.ctx);
+  const lage = useLeitstand((s) => s.lage);
+  const zeit = useLeitstand((s) => s.zeit);
   const lageVersion = useLeitstand((s) => s.lageVersion);
-  const { kameraAbstand: abstand, auswahl, tipp } = useAnsicht();
+  const abstand = useAnsicht((s) => s.kameraAbstand);
+  const auswahl = useAnsicht((s) => s.auswahl);
+  const tipp = useAnsicht((s) => s.tipp);
   const vorschau = useLeitstand((s) => s.vorschau);
   const nachrichten = useLeitstand((s) => s.nachrichten);
 
@@ -92,7 +96,7 @@ export function LabelEbene() {
       </div>
     </div>
   );
-}
+});
 
 /** In der Vorschau: wie verschiebt sich das Tourende? */
 function VorschauDelta({ tourId }: { tourId: string }) {

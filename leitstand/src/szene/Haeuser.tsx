@@ -41,7 +41,15 @@ export function Haeuser({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan 
   const koerper = useRef<InstancedMesh>(null);
   const daecher = useRef<InstancedMesh>(null);
   const [hoverHaus, setHoverHaus] = useState<number | null>(null);
-  const { qualitaet, tourDaecher, auswahl, waehlen, hovern, fliegen, tippSetzen, kameraAbstand } = useAnsicht();
+  // nur die Teile der Ansicht, die die Häuser brauchen (sonst zeichnet jede Mausbewegung alles neu)
+  const qualitaet = useAnsicht((s) => s.qualitaet);
+  const tourDaecher = useAnsicht((s) => s.tourDaecher);
+  const auswahl = useAnsicht((s) => s.auswahl);
+  const waehlen = useAnsicht((s) => s.waehlen);
+  const hovern = useAnsicht((s) => s.hovern);
+  const fliegen = useAnsicht((s) => s.fliegen);
+  const tippSetzen = useAnsicht((s) => s.tippSetzen);
+  const kameraAbstand = useAnsicht((s) => s.kameraAbstand);
   const geo = useMemo(() => ({ koerper: hausGeometrie(), dach: dachGeometrie() }), []);
   /** Grundfarben (ohne Leuchten) und gerade leuchtende Häuser */
   const grund = useRef<{ koerper: Color[]; dach: Color[] }>({ koerper: [], dach: [] });

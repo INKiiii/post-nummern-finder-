@@ -194,7 +194,7 @@ try {
 
       s('Vormittag');
       await page.getByRole('button', { name: 'Menü' }).click();
-      await page.getByRole('button', { name: 'Ganze Karte' }).click();
+      await page.locator('.menue').getByRole('button', { name: 'Ganze Karte' }).click();
       await page.locator('button[aria-label="Start"]').first().click();
       await page.waitForTimeout(2500);
       await bild(page, `${name}-3d-vormittag`);

@@ -3,6 +3,7 @@ import type { Lagebild } from '../core/lagebild';
 import { behaelterFolge } from '../core/modell';
 import type { Plan, Tag, Welt } from '../core/types';
 import type { Auswahl } from '../state/ansicht';
+import { fahrzeugOrte } from './fahrzeugOrte';
 import { S } from './koord';
 import { hallenPlatz, halleMitte, rampenPose } from './layout';
 
@@ -41,6 +42,9 @@ export function bezirkMitte(welt: Welt, id: string): { x: number; z: number } {
 export function fahrzeugPosition(welt: Welt, tag: Tag, tourId: string, lage: Lagebild | null, zeit: number): { x: number; z: number; unterwegs: boolean } {
   const t = tag.touren.find((x) => x.id === tourId)!;
   const p = lage?.pose(tourId, zeit);
+  // so, wie es gerade gezeichnet wird (auch auf dem Hof zwischen Rampe und Straße)
+  const ort = fahrzeugOrte.get(tourId);
+  if (ort) return { x: ort.x, z: ort.z, unterwegs: !!p && !p.anRampe };
   if (p && !p.anRampe) return { x: p.x * S, z: -p.y * S, unterwegs: true };
   const r = rampenPose(welt, t.rampe);
   return { x: r.x, z: r.z, unterwegs: false };

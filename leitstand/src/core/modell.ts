@@ -82,7 +82,7 @@ export function tourKosten(aktiv: boolean, dauerMin: number, km: number, a: Anna
 }
 
 export function leereMinuten(): Minuten {
-  return { laden: 0, fahrtZwischen: 0, fahrtInnen: 0, zustellung: 0, uebergabe: 0, warten: 0 };
+  return { laden: 0, fahrtZwischen: 0, fahrtInnen: 0, zustellung: 0, uebergabe: 0, warten: 0, tempo: 0 };
 }
 
 export function leeresBisher(): Bisher {
@@ -90,7 +90,7 @@ export function leeresBisher(): Bisher {
 }
 
 export function summeMinuten(m: Minuten): number {
-  return m.laden + m.fahrtZwischen + m.fahrtInnen + m.zustellung + m.uebergabe + m.warten;
+  return m.laden + m.fahrtZwischen + m.fahrtInnen + m.zustellung + m.uebergabe + m.warten + (m.tempo ?? 0);
 }
 
 export function addInhalt(a: Inhalt, b: Inhalt): Inhalt {
@@ -150,6 +150,8 @@ export interface TourAuswertung {
   abfahrt: number | null;
   /** Rückkehr an die Basis (bzw. Ende bei Defekt) */
   ende: number;
+  /** Tempo-Faktor ab Planungsbeginn (1 = wie geplant; aus den Scans) */
+  tempo: number;
   dauer: number;
   ueberstundenMin: number;
   km: { zwischen: number; innen: number; gesamt: number };
@@ -263,7 +265,7 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
       anBord: new Set(s.geladen),
       kmZw: s.bisher.kmZwischen,
       kmIn: s.bisher.kmInnen,
-      min: { ...s.bisher.min },
+      min: { ...leereMinuten(), ...s.bisher.min },
       zust: { pakete: 0, briefe: 0, zeitungen: 0, summe: 0 },
       menge: { ...s.bisher.menge },
       aus: [],
@@ -305,10 +307,12 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
             l.ende = l.t;
           } else {
             const km = wege.distanz(l.knoten, welt.basis.knoten);
-            const m = fahrMinuten(km, a.tempoZwischenKmh);
+            const m0 = fahrMinuten(km, a.tempoZwischenKmh);
+            const m = m0 * tempoVon(l);
             l.rueckfahrt = { abfahrt: l.t, ankunft: l.t + m, km, min: m, von: l.knoten };
             l.kmZw += km;
-            l.min.fahrtZwischen += m;
+            l.min.fahrtZwischen += m0;
+            l.min.tempo += m - m0;
             l.t += m;
             l.knoten = welt.basis.knoten;
             l.ende = l.t;
@@ -330,11 +334,16 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
           const abfahrt = l.t;
           const km = wege.distanz(l.knoten, bz.anfahrpunkt);
           if (!Number.isFinite(km)) fehler.push(`Bezirk ${bz.id} ist von Tour ${tourNr(ctx, l.id)} aus nicht erreichbar.`);
-          const anfahrtMin = fahrMinuten(km, a.tempoZwischenKmh);
-          const innenMin = fahrMinuten(bz.innenKm, a.tempoImGebietKmh);
+          // Modellzeiten; mit dem beobachteten Tempo der Tour (ab jetzt) gestreckt bzw. gestaucht
+          const f = tempoVon(l);
+          const anfahrt0 = fahrMinuten(km, a.tempoZwischenKmh);
+          const innen0 = fahrMinuten(bz.innenKm, a.tempoImGebietKmh);
           const z = zustellMinuten(stamm.inhalt, a);
+          const anfahrtMin = anfahrt0 * f;
+          const innenMin = innen0 * f;
+          const zustellMin = z.summe * f;
           const ankunft = abfahrt + anfahrtMin;
-          const ende = ankunft + innenMin + z.summe;
+          const ende = ankunft + innenMin + zustellMin;
           l.aus.push({
             schritt: s,
             abfahrt,
@@ -347,15 +356,16 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
             anfahrtMin,
             innenKm: bz.innenKm,
             innenMin,
-            zustellMin: z.summe,
+            zustellMin,
             wartenMin: 0,
             uebergabeMin: 0,
           });
           l.kmZw += km;
           l.kmIn += bz.innenKm;
-          l.min.fahrtZwischen += anfahrtMin;
-          l.min.fahrtInnen += innenMin;
+          l.min.fahrtZwischen += anfahrt0;
+          l.min.fahrtInnen += innen0;
           l.min.zustellung += z.summe;
+          l.min.tempo += anfahrtMin + innenMin + zustellMin - (anfahrt0 + innen0 + z.summe);
           l.zust = { pakete: l.zust.pakete + z.pakete, briefe: l.zust.briefe + z.briefe, zeitungen: l.zust.zeitungen + z.zeitungen, summe: l.zust.summe + z.summe };
           l.menge = addInhalt(l.menge, stamm.inhalt);
           l.anBord.delete(s.behaelterId);
@@ -368,10 +378,12 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
           if (l.s.defekt) {
             if (s.treffpunkt !== l.knoten) fehler.push(`Tour ${tourNr(ctx, l.id)} hat einen Defekt; die Übergabe muss am Standort stattfinden.`);
           } else km = wege.distanz(l.knoten, s.treffpunkt);
-          const m = fahrMinuten(km, a.tempoZwischenKmh);
+          const m0 = fahrMinuten(km, a.tempoZwischenKmh);
+          const m = m0 * tempoVon(l);
           l.wartet = { schritt: s, abfahrt: l.t, ankunft: l.t + m, von: l.knoten, km, fahrMin: m };
           l.kmZw += km;
-          l.min.fahrtZwischen += m;
+          l.min.fahrtZwischen += m0;
+          l.min.tempo += m - m0;
           l.t += m;
           l.knoten = s.treffpunkt;
         }
@@ -479,6 +491,7 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
       start: l.s.zeit,
       abfahrt: l.abfahrt,
       ende: l.aktiv ? l.ende : l.s.zeit,
+      tempo: tempoVon(l),
       dauer,
       ueberstundenMin: ueber,
       km: { zwischen: l.kmZw, innen: l.kmIn, gesamt: kmGesamt },
@@ -523,6 +536,12 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
     gueltig: fehler.length === 0,
     fehler: [...new Set(fehler)],
   };
+}
+
+/** Tempo-Faktor einer Tour ab dem Start der Planung (aus dem Lagebild, sonst 1) */
+function tempoVon(l: { s: StartZustand }): number {
+  const f = l.s.tempo ?? 1;
+  return Number.isFinite(f) && f > 0 ? f : 1;
 }
 
 function gleicheMenge(a: string[], b: string[]): boolean {

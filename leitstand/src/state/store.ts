@@ -543,7 +543,8 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       const wichtig = neu.some((e) => e.art === 'TOUR_START' || e.art === 'TOUR_ENDE' || e.art === 'BEHAELTER_VERLADEN');
       const jetzt = performance.now();
       if (neu.length) logAnhaengen(neu.slice(-200).map((e): LogEintrag => ({ quelle: 'scan', e })));
-      if (jetzt - letzteUi > 100 || wichtig) {
+      // Bedienelemente 5× je Sekunde; die 3D-Szene bewegt sich unabhängig davon jedes Bild
+      if (jetzt - letzteUi > 200 || wichtig) {
         letzteUi = jetzt;
         set({ zeit: t, lageVersion: get().lageVersion + 1, laeuft: t < TAG_ENDE });
       }

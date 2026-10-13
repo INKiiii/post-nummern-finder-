@@ -40,6 +40,7 @@ export const DREHBUCH: Drehbuch = {
       A().folgenSetzen(null);
       A().draufsichtSetzen(false);
       await L().szenarioBeenden();
+      A().blattSetzen(false);
       ganzeKarte();
       const { ctx } = L();
       if (ctx)
@@ -51,6 +52,7 @@ export const DREHBUCH: Drehbuch = {
 
     // 2 · Beladen an den Rampen
     await d.schritt(12000, () => {
+      A().blattSetzen(false);
       basisZeigen();
       L().zeitSetzen(6 * 60 + 57);
       d.uhr(60);
@@ -141,6 +143,7 @@ export const DREHBUCH: Drehbuch = {
       const k = welt.netz.knoten[u.treffpunkt.knoten];
       A().waehlen(null);
       A().folgenSetzen(null);
+      A().blattSetzen(false);
       const schmal = window.innerWidth < 820;
       A().fliegen({ ziel: [k.x * S, 0, -k.y * S], distanz: schmal ? 45 : 26, polar: 0.95 });
       d.zeige(

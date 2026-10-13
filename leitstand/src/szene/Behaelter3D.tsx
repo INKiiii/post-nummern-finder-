@@ -32,14 +32,22 @@ const UMZUG_MS = 1300;
  */
 export function Behaelter3D({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan }) {
   const lage = useLeitstand((s) => s.lage);
-  const lageVersion = useLeitstand((s) => s.lageVersion);
+  // die Lage zählt hier nur für die Umrisse markierter Behälter
+  const markiertIrgendwas = useAnsicht((s) => s.auswahl?.art === 'behaelter' || s.hover?.art === 'behaelter' || s.ziehen?.ziel?.art === 'behaelter');
+  const lageVersion = useLeitstand((s) => (markiertIrgendwas ? s.lageVersion : 0));
   const inHalle = useMemo(() => {
     void lageVersion;
     return Object.fromEntries(tag.behaelterIds.map((id) => [id, !lage || lage.behaelter(id).status === 'halle']));
   }, [lage, lageVersion, tag]);
   const ref = useRef<InstancedMesh>(null);
   const geo = useMemo(() => behaelterGeometrie(), []);
-  const { auswahl, hover, waehlen, hovern, fliegen, tippSetzen, kameraAbstand } = useAnsicht();
+  const auswahl = useAnsicht((s) => s.auswahl);
+  const hover = useAnsicht((s) => s.hover);
+  const waehlen = useAnsicht((s) => s.waehlen);
+  const hovern = useAnsicht((s) => s.hovern);
+  const fliegen = useAnsicht((s) => s.fliegen);
+  const tippSetzen = useAnsicht((s) => s.tippSetzen);
+  const kameraAbstand = useAnsicht((s) => s.kameraAbstand);
   const ids = tag.behaelterIds;
   /** zuletzt gesetzter Zustand je Instanz ('h' Halle, 'x' weg, 'r' rollt), damit nur Änderungen hochgeladen werden */
   const zustand = useRef<string[]>([]);

@@ -2734,3 +2734,55 @@ table.quellen td.nichts {
   background: var(--flaeche);
   box-shadow: var(--schatten);
 }
+
+/* ---- Kamera folgt ------------------------------------------------------------------- */
+
+.folgen-chip {
+  position: absolute;
+  z-index: 7;
+  top: calc(76px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.folgen-chip .farbe {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.folgen-chip button {
+  border: 0;
+  background: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 13px;
+}
+
+.folgen-chip button:hover {
+  background: var(--rand);
+}
+
+@media (max-width: 819px) {
+  .folgen-chip {
+    top: calc(104px + env(safe-area-inset-top));
+    left: 10px;
+    transform: none;
+  }
+}
+
+/* Leitstand: die Seite selbst scrollt nicht, Wischen gehört der Karte */
+html.ls-vollbild,
+html.ls-vollbild body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}

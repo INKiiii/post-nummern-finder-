@@ -718,6 +718,8 @@ export class Lagebild {
         erledigt: zurueck ? [...new Set([...erledigt, ...f.behaelter])] : erledigt,
         defekt: !!f.defekt,
         bisher,
+        // dasselbe Tempo wie in den Prognosen des Lagebilds (Rückkehr, Ankunft am Bezirk)
+        tempo: zurueck || f.defekt ? 1 : this.tempo(f),
       };
     }
     return erg;

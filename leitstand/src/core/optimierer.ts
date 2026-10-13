@@ -121,14 +121,17 @@ export class Problem {
       const kosten = tourKosten(true, dauer, km, a).summe;
       return { wert: kosten + ueber * STRAFE_JE_UEBERSTUNDE_MIN, kosten, dauer, ueber, km };
     }
-    let t = s.zeit + (s.mussLaden ? a.ladezeitMin : 0);
+    // Fahr- und Zustellzeit ab jetzt, mit dem beobachteten Tempo der Tour (wie im Rechenmodell)
+    const f = s.tempo && Number.isFinite(s.tempo) && s.tempo > 0 ? s.tempo : 1;
+    let rest = 0;
     let kmIn = s.bisher.kmInnen;
     for (const b of folge) {
       kmIn += this.innenKm.get(b)!;
-      t += this.arbeitMin.get(b)!;
+      rest += this.arbeitMin.get(b)!;
     }
     const kmZw = s.bisher.kmZwischen + this.kmZwischen(tourId, folge);
-    t += fahrMinuten(kmZw - s.bisher.kmZwischen, a.tempoZwischenKmh);
+    rest += fahrMinuten(kmZw - s.bisher.kmZwischen, a.tempoZwischenKmh);
+    const t = s.zeit + (s.mussLaden ? a.ladezeitMin : 0) + rest * f;
     const dauer = t - s.schichtbeginn;
     const ueber = Math.max(0, dauer - schichtMin(a));
     const kosten = tourKosten(true, dauer, kmZw + kmIn, a).summe;

@@ -39,12 +39,12 @@ Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
 |---|---|
 | `#/` | 3D-Leitstand |
 | `?demo` oder `#demo` | 3D-Leitstand, die geführte Demo startet sofort (für Aufnahmen) |
-
-Statt `#/zahlen` geht auch `#zahlen` (ebenso `#datenquellen`, `#kern`), z. B. für Einbettungen, die nur einfache Anker weitergeben. Eingebettet in einen fremden Rahmen blendet die Seite „Idee in Zahlen“ den Drucken-Knopf aus.
 | `#/zahlen` | Idee in Zahlen (druckbar) |
 | `#/datenquellen` | Datenquellen: was der Leitstand braucht |
 | `#/fahrer` | Geräte-Ansicht der Fahrer/innen (eigenes Fenster) |
 | `#/kern` | Prüfansicht des Rechenkerns |
+
+Statt `#/zahlen` geht auch `#zahlen` (ebenso `#datenquellen`, `#kern`), z. B. für Einbettungen, die nur einfache Anker weitergeben. Eingebettet in einen fremden Rahmen blendet die Seite „Idee in Zahlen“ den Drucken-Knopf aus.
 
 ### Online (GitHub Pages)
 
@@ -101,6 +101,8 @@ mit Rechenweg der Hauptzahl im Anhang.
 | Drehen/Neigen | rechte Maustaste ziehen | zwei Finger drehen/schieben |
 | Zoomen | Mausrad (zum Mauszeiger hin; beim Verfolgen zum Fahrzeug) | zwei Finger spreizen |
 | Auswählen | Klick auf Fahrzeug, Behälter oder Haus | Tippen |
+| Fahrzeug verfolgen | Fahrzeug oder Tour in der Liste anklicken (auch an der Rampe); ✕ beim Hinweis „Kamera folgt …“ oder Verschieben beendet es | Fahrzeug oder Tour antippen |
+| Zoom-Knöpfe | – | rechts: + / − / ⤢ (ganze Karte), falls Gesten in einer App nicht ankommen |
 
 * **3D / Draufsicht** schaltet die Ansicht um, **Basis zeigen** fliegt zu den Rampen.
 * Klick auf ein Objekt (oder eine Tour in der Liste) fliegt sanft dorthin und öffnet das Panel:
@@ -363,6 +365,9 @@ Alle Parameter stehen in `src/config.ts`, sind im UI als **Annahme** markiert un
   * Fahrzeit im Gebiet mit 18 km/h (Rundweg durch alle Stopps des Bezirks)
   * Zustellzeit: 1,2 Min je Paket, 3,6 Sek je Brief, 3 Sek je Zeitung
   * bei Umplanung im Tagesverlauf zusätzlich Übergaben (10 Min) und Wartezeit am Treffpunkt
+  * im Tagesverlauf rechnet der Rest jeder Tour mit dem Tempo, das die Scans bisher zeigen
+    (z. B. 3 % langsamer als geplant). Tourliste, Fahrzeug-Panel, Vorschläge und Rechenweg
+    zeigen damit dieselbe Rückkehrzeit; der Rechenweg nennt das Tempo als eigene Zeile.
 * **Kosten je Tour und Tag** = Schicht × Stundensatz (volle Schicht wird bezahlt)
   \+ Überstunden × Stundensatz × (1 + Zuschlag) + km × €/km + Fahrzeug fix.
   Eine Tour ohne Behälter kostet 0.

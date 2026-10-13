@@ -9,6 +9,7 @@ import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
 import { umplanenAuf } from '../ui/aktionen';
 import { simUhr, useLeitstand } from '../state/store';
 import { setzeAnker } from './beschriftung';
+import { fahrzeugOrte } from './fahrzeugOrte';
 import { S } from './koord';
 import { abfahrtPose, ankunftPose, rampenPose } from './layout';
 import { textTextur } from './textur';
@@ -78,7 +79,13 @@ export function Fahrzeuge({ ctx }: { ctx: Kontext }) {
 function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
   const gruppe = useRef<Group>(null);
   const winkel = useRef<number | null>(null);
-  const { auswahl, hover, waehlen, hovern, fliegen, folgenSetzen, kameraAbstand } = useAnsicht();
+  const auswahl = useAnsicht((s) => s.auswahl);
+  const hover = useAnsicht((s) => s.hover);
+  const waehlen = useAnsicht((s) => s.waehlen);
+  const hovern = useAnsicht((s) => s.hovern);
+  const fliegen = useAnsicht((s) => s.fliegen);
+  const folgenSetzen = useAnsicht((s) => s.folgenSetzen);
+  const kameraAbstand = useAnsicht((s) => s.kameraAbstand);
   const lage = useLeitstand((s) => s.lage);
   const rampe = rampenPose(ctx.welt, tour.rampe);
   const ich = { art: 'fahrzeug' as const, id: tour.id };
@@ -129,6 +136,11 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
     const zoom = Math.min(grenze, Math.max(1, abstand / 45));
     zoomRef.current = zoom;
     g.position.set(x, 0, z);
+    const ort = fahrzeugOrte.get(tour.id);
+    if (ort) {
+      ort.x = x;
+      ort.z = z;
+    } else fahrzeugOrte.set(tour.id, { x, z });
     // sanft lenken statt an jeder Ecke springen
     if (winkel.current === null || sofort) winkel.current = ziel;
     else {
@@ -156,7 +168,8 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
     l.zeit = zeit;
     const haelt = !p.anRampe && !p.uebergang && zeit - l.bewegt > 0.15;
     if (blinker.current) blinker.current.visible = haelt && performance.now() % 800 < 430;
-  });
+    // vor Kamera (0) und Steuerung (−1): wer dem Fahrzeug folgt, sieht die Position dieses Bildes
+  }, -2);
 
   const umriss = gewaehlt || gehovert;
   const dicke = umrissDicke(kameraAbstand, gewaehlt ? 1.3 : 0.8) / zoomRef.current;
@@ -188,8 +201,9 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
         waehlen(ich);
         const g = gruppe.current!;
         const faehrt = lage ? !lage.pose(tour.id, simUhr.zeit).anRampe : false;
-        fliegen({ ziel: [g.position.x, 0.3, g.position.z], distanz: faehrt ? 70 : 14 });
-        folgenSetzen(faehrt ? tour.id : null);
+        fliegen({ ziel: [g.position.x, 0.3, g.position.z], distanz: faehrt ? 70 : 18 });
+        // die Kamera bleibt am Fahrzeug, auch wenn es erst noch an der Rampe steht
+        folgenSetzen(tour.id);
       }}
     >
       <mesh geometry={GEO.kasten} castShadow receiveShadow>

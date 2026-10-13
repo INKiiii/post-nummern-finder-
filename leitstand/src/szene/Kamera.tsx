@@ -5,6 +5,7 @@ import { MathUtils, PerspectiveCamera, Spherical, Vector3 } from 'three';
 import type { MapControls as MapControlsImpl } from 'three-stdlib';
 import { useAnsicht } from '../state/ansicht';
 import { simUhr, useLeitstand } from '../state/store';
+import { fahrzeugOrte } from './fahrzeugOrte';
 import { S } from './koord';
 
 export const POLAR_3D = 0.95;
@@ -43,12 +44,17 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   const folgeVorher = useRef<{ x: number; z: number } | null>(null);
   /** Abstand Blickziel – verfolgtes Fahrzeug zu Beginn einer Bedienung */
   const folgeAbstand = useRef<{ x: number; z: number } | null>(null);
+  /** läuft gerade eine Bedienung (Ziehen, Zoomen, Drehen)? */
+  const bedienung = useRef(false);
 
-  /** Position des verfolgten Fahrzeugs (nur unterwegs) */
+  /** Position des verfolgten Fahrzeugs, so wie es gezeichnet wird (auch an der Rampe) */
   const folgePunkt = (): { x: number; z: number } | null => {
     const folgen = useAnsicht.getState().folgen;
+    if (!folgen) return null;
+    const ort = fahrzeugOrte.get(folgen);
+    if (ort) return ort;
     const lage = useLeitstand.getState().lage;
-    if (!folgen || !lage) return null;
+    if (!lage) return null;
     const p = lage.pose(folgen, simUhr.zeit);
     return p.anRampe ? null : { x: p.x * S, z: -p.y * S };
   };
@@ -111,16 +117,30 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   useFrame(() => {
     const c = ref.current;
     if (!c) return;
-    // ausgewähltem Fahrzeug folgen (Position aus dem Lagebild)
+    // ausgewähltem Fahrzeug folgen (gezeichnete Position, auch an der Rampe)
     const folgen = useAnsicht.getState().folgen;
-    const lage = useLeitstand.getState().lage;
-    if (folgen && lage) {
-      const p = lage.pose(folgen, simUhr.zeit);
-      if (!p.anRampe) {
-        const x = p.x * S;
-        const z = -p.y * S;
-        if (anim.current) anim.current.nachZiel.set(x, anim.current.nachZiel.y, z);
-        else if (folgeVorher.current) {
+    if (folgen) {
+      const p = folgePunkt();
+      if (p) {
+        const x = p.x;
+        const z = p.z;
+        if (anim.current) {
+          // Flug: am Ende so stehen, dass das Fahrzeug im sichtbaren Teil des Bildes ist
+          const a = anim.current;
+          const v = blattVersatz(a.nachR, a.nachPhi, a.nachTheta);
+          a.nachZiel.set(x + v.x, a.nachZiel.y, z + v.z);
+        } else if (!bedienung.current) {
+          // ruhig: Blickziel am Fahrzeug halten (auch nach dem Zoomen per Knopf richtig versetzt)
+          versatz.copy(camera.position).sub(c.target);
+          kugel.setFromVector3(versatz);
+          const v = blattVersatz(kugel.radius, kugel.phi, kugel.theta);
+          const dx = x + v.x - c.target.x;
+          const dz = z + v.z - c.target.z;
+          c.target.x += dx;
+          c.target.z += dz;
+          camera.position.x += dx;
+          camera.position.z += dz;
+        } else if (folgeVorher.current) {
           const dx = x - folgeVorher.current.x;
           const dz = z - folgeVorher.current.z;
           c.target.x += dx;
@@ -191,6 +211,7 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
       screenSpacePanning={false}
       onStart={() => {
         anim.current = null;
+        bedienung.current = true;
         // Zoomen und Drehen behalten die Verfolgung bei; ob verschoben wurde, zeigt sich am Ende
         const c = ref.current;
         const p = folgePunkt();
@@ -202,6 +223,7 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
         }
       }}
       onEnd={() => {
+        bedienung.current = false;
         const c = ref.current;
         const p = folgePunkt();
         const vorher = folgeAbstand.current;
@@ -240,18 +262,18 @@ export function startKamera(breiteKm: number, hoeheKm: number): { position: [num
   return { position: [ziel[0], Math.cos(phi) * r, ziel[2] + Math.sin(phi) * r], ziel };
 }
 
-/** Auf schmalen Bildschirmen verdeckt das Blatt unten die Bildmitte: Ziel etwas nach oben rücken */
-function versatzFuerBlatt(ziel: Vector3, r: number, phi: number, theta: number): Vector3 {
-  if (!istSchmal()) return ziel;
-  // Objekt etwa auf halber Höhe zwischen Bildmitte und oberem Rand
-  const v = (r * 0.16) / Math.max(0.35, Math.cos(phi));
+/**
+ * Auf schmalen Bildschirmen verdeckt das Blatt unten einen Teil des Bildes: um so viel das
+ * Blickziel zur Kamera hin rücken, dass das Objekt in der Mitte des sichtbaren Teils steht.
+ */
+function blattVersatz(r: number, phi: number, theta: number): { x: number; z: number } {
+  if (!istSchmal()) return { x: 0, z: 0 };
+  const v = (r * 0.12) / Math.max(0.35, Math.cos(phi));
   // Richtung „unten am Bildschirm“ auf dem Boden = zur Kamera hin
-  const z = ziel.clone();
-  if (phi < 0.05) {
-    z.z += v;
-  } else {
-    z.x += Math.sin(theta) * v;
-    z.z += Math.cos(theta) * v;
-  }
-  return z;
+  return phi < 0.05 ? { x: 0, z: v } : { x: Math.sin(theta) * v, z: Math.cos(theta) * v };
+}
+
+function versatzFuerBlatt(ziel: Vector3, r: number, phi: number, theta: number): Vector3 {
+  const v = blattVersatz(r, phi, theta);
+  return ziel.clone().add(new Vector3(v.x, 0, v.z));
 }

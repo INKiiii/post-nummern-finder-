@@ -77,6 +77,15 @@ export function rechenwegTourZeit(ctx: Kontext, t: TourAuswertung): Rechenweg {
   });
   if (t.min.uebergabe > 0) zeilen.push({ was: G.uebergabe, rechnung: wert(a, 'uebergabeMin') + ' je Übergabe', ergebnis: fmtDauer(t.min.uebergabe), annahmen: ['uebergabeMin'] });
   if (t.min.warten > 0.5) zeilen.push({ was: 'Warten am Treffpunkt', rechnung: 'bis das andere Fahrzeug da ist', ergebnis: fmtDauer(t.min.warten), annahmen: [] });
+  if (Math.abs(t.min.tempo ?? 0) > 0.5) {
+    const pct = Math.round(Math.abs(t.tempo - 1) * 100);
+    zeilen.push({
+      was: 'Tempo laut Scans',
+      rechnung: `bisher ${pct} % ${t.tempo > 1 ? 'langsamer' : 'schneller'} als geplant, für den Rest der Tour angenommen`,
+      ergebnis: `${t.min.tempo > 0 ? '+' : ''}${fmtDauer(t.min.tempo)}`,
+      annahmen: [],
+    });
+  }
   zeilen.push({ was: 'Arbeitszeit', rechnung: 'Summe', ergebnis: fmtDauer(t.dauer), annahmen: [], summe: true });
   const hinweise: string[] = [];
   if (t.ueberstundenMin > 0.5) hinweise.push(`Schicht ${wert(a, 'schichtStunden')} überschritten: ${fmtDauer(t.ueberstundenMin)} Überstunden.`);

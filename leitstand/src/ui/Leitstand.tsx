@@ -95,6 +95,12 @@ export function Leitstand() {
     if (ansicht.auswahl) setBlattOffen(true);
   }, [ansicht.auswahl]);
 
+  // Vollbild-Anwendung: die Seite selbst scrollt nicht (Wischen gehört der Karte)
+  useEffect(() => {
+    document.documentElement.classList.add('ls-vollbild');
+    return () => document.documentElement.classList.remove('ls-vollbild');
+  }, []);
+
   // Wunsch von außen (Demo): Vorschläge oder Szenarien zeigen
   const seitenWunsch = ansicht.seitenWunsch;
   useEffect(() => {
@@ -104,6 +110,12 @@ export function Leitstand() {
       setBlattOffen(true);
     } else setRechtsAnsicht(seitenWunsch.ansicht);
   }, [seitenWunsch, schmal]);
+
+  // Wunsch von außen (Demo): Blatt ein- oder ausklappen
+  const blattWunsch = ansicht.blattWunsch;
+  useEffect(() => {
+    if (blattWunsch) setBlattOffen(blattWunsch.offen);
+  }, [blattWunsch]);
 
   // Handy: zum Antippen des Ziel-Fahrzeugs das Blatt einklappen, danach wieder öffnen
   const zielWahlAktiv = !!ansicht.zielWahl;
@@ -267,6 +279,16 @@ export function Leitstand() {
           </button>
           <button className="knopf symbol" onClick={ganzeKarte} aria-label="Ganze Karte" title="Ganze Karte">
             ⤢
+          </button>
+        </div>
+      )}
+
+      {ansicht.folgen && !demoAktiv && (
+        <div className="folgen-chip glas" role="status">
+          <span className="farbe" style={{ background: ctx.tag.touren.find((t) => t.id === ansicht.folgen)?.farbe }} />
+          <span>Kamera folgt {tourName(ctx, ansicht.folgen)}</span>
+          <button onClick={() => ansicht.folgenSetzen(null)} aria-label="Nicht mehr folgen" title="Nicht mehr folgen">
+            ✕
           </button>
         </div>
       )}

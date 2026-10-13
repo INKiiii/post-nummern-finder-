@@ -208,6 +208,8 @@ export interface Minuten {
   zustellung: number;
   uebergabe: number;
   warten: number;
+  /** Mehr- (oder Minder-)zeit, weil die Tour laut Scans langsamer (schneller) ist als geplant */
+  tempo: number;
 }
 
 /** Was eine Tour bis zum Startpunkt einer (Um-)Planung schon geleistet hat */
@@ -240,6 +242,11 @@ export interface StartZustand {
   schichtbeginn: number;
   /** Tour wird von einem Springer gefahren */
   springer: boolean;
+  /**
+   * Beobachtetes Tempo aus den Scans: Faktor auf die restlichen Fahr- und Zustellzeiten
+   * (1 = wie geplant, 1,05 = 5 % langsamer). Fehlt er, gilt 1.
+   */
+  tempo?: number;
 }
 
 export interface Tag {

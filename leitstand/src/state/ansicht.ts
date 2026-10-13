@@ -48,6 +48,8 @@ interface AnsichtZustand {
   ziehen: { behaelterId: string; ziel: Auswahl } | null;
   /** kurze Meldung unten in der Mitte */
   hinweis: { text: string; nr: number } | null;
+  /** Wunsch von außen (Demo): Blatt am Handy ein- oder ausklappen */
+  blattWunsch: { offen: boolean; nr: number } | null;
   /** Zoom per Knopf (Handy): Abstand × faktor */
   zoom: { faktor: number; nr: number } | null;
   /** Wunsch von außen (Demo): Vorschläge bzw. Szenarien rechts (Handy: im Blatt) zeigen */
@@ -67,6 +69,7 @@ interface AnsichtZustand {
   hinweisSetzen: (text: string | null) => void;
   seiteZeigen: (ansicht: SeitenAnsicht) => void;
   zoomen: (faktor: number) => void;
+  blattSetzen: (offen: boolean) => void;
 }
 
 export type SeitenAnsicht = 'vorschlaege' | 'szenarien';
@@ -91,6 +94,7 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   hinweis: null,
   seitenWunsch: null,
   zoom: null,
+  blattWunsch: null,
 
   waehlen: (auswahl) => set({ auswahl, folgen: auswahl?.art === 'fahrzeug' && auswahl.id === get().folgen ? get().folgen : null }),
   hovern: (hover) => {
@@ -117,6 +121,7 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   hinweisSetzen: (text) => set({ hinweis: text ? { text, nr: ++hinweisNr } : null }),
   seiteZeigen: (ansicht) => set({ auswahl: null, seitenWunsch: { ansicht, nr: ++seitenNr } }),
   zoomen: (faktor) => set({ zoom: { faktor, nr: ++zoomNr } }),
+  blattSetzen: (offen) => set({ blattWunsch: { offen, nr: ++zoomNr } }),
   tippSetzen: (tipp) => {
     if (get().tipp !== tipp) set({ tipp });
   },

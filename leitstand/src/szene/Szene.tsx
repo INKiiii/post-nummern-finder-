@@ -1,4 +1,5 @@
 import { Canvas } from '@react-three/fiber';
+import { memo } from 'react';
 import { NeutralToneMapping, PCFShadowMap } from 'three';
 import { useAnsicht } from '../state/ansicht';
 import { useLeitstand } from '../state/store';
@@ -17,8 +18,11 @@ import { Strassen } from './Strassen';
 import { VorschauSzene } from './VorschauSzene';
 import { Ziehen } from './Ziehen';
 
-/** Die 3D-Welt des Leitstands */
-export function Szene() {
+/**
+ * Die 3D-Welt des Leitstands. memo: Die Szene hängt nur an Kontext, Plan und Qualität –
+ * nicht an jedem Takt der Uhr, mit dem sich die Bedienelemente aktualisieren.
+ */
+export const Szene = memo(function Szene() {
   const ctx = useLeitstand((s) => s.ctx);
   const plan = useLeitstand((s) => s.plan);
   const qualitaet = useAnsicht((s) => s.qualitaet);
@@ -55,4 +59,4 @@ export function Szene() {
       <LabelProjektor />
     </Canvas>
   );
-}
+});

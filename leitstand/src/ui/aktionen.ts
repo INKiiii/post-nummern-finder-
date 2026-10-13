@@ -17,9 +17,9 @@ export function waehleUndZeige(a: Auswahl): void {
   if (!a || !welt || !tag || !plan) return;
   if (a.art === 'fahrzeug') {
     const p = fahrzeugPosition(welt, tag, a.id, lage, simUhr.zeit);
-    fliegen({ ziel: [p.x, 0.3, p.z], distanz: p.unterwegs ? 70 : 14 });
-    // fahrende Fahrzeuge behält die Kamera im Blick
-    folgenSetzen(p.unterwegs ? a.id : null);
+    fliegen({ ziel: [p.x, 0.3, p.z], distanz: p.unterwegs ? 70 : 18 });
+    // die Kamera bleibt am Fahrzeug – auch wenn es erst noch an der Rampe steht
+    folgenSetzen(a.id);
   } else if (a.art === 'behaelter') {
     const p = behaelterPosition(welt, tag, plan, a.id);
     fliegen({ ziel: [p.x, 0.3, p.z], distanz: 9 });
@@ -35,6 +35,7 @@ export function basisZeigen(): void {
   const { welt } = useLeitstand.getState();
   if (!welt) return;
   const p = basisPosition(welt);
+  useAnsicht.getState().folgenSetzen(null);
   // von Nordosten auf die Rampen schauen
   useAnsicht.getState().fliegen({ ziel: [p.x, 0, p.z - 1.5], distanz: 22, polar: 0.92, azimut: Math.PI - 0.55 });
 }
@@ -42,6 +43,7 @@ export function basisZeigen(): void {
 export function ganzeKarte(): void {
   const { welt } = useLeitstand.getState();
   if (!welt) return;
+  useAnsicht.getState().folgenSetzen(null);
   useAnsicht.getState().fliegen({ ziel: [welt.breiteKm * 50, 0, -welt.hoeheKm * 50], distanz: uebersichtsAbstand(), polar: uebersichtsPolar(), azimut: 0 });
 }
 
