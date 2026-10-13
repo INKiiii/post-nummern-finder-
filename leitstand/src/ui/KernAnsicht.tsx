@@ -43,10 +43,13 @@ export function KernAnsicht() {
         <div className="titel">
           <h1>Zustell-{G.leitstand} 3D · Prototyp</h1>
           <div className="leise" style={{ fontSize: 13 }}>
-            Phase 1: Rechenkern mit Demo-Welt „{ctx.welt.name}“ · alle Daten erfunden · {ctx.tag.datum}
+            Prüfansicht des Rechenkerns mit Demo-Welt „{ctx.welt.name}“ · alle Daten erfunden · {ctx.tag.datum}
           </div>
         </div>
         <div className="aktionen">
+          <a className="knopf" href="#/" style={{ textDecoration: 'none' }}>
+            ← 3D-{G.leitstand}
+          </a>
           <button className="knopf" onClick={s.rueckgaengig} disabled={s.verlaufIndex <= 0} title="Rückgängig">
             ↶ Rückgängig
           </button>

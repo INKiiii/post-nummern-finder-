@@ -32,6 +32,8 @@ interface LeitstandZustand {
   vorschlaege: Vorschlag[];
   vorschlaegeLaden: boolean;
   fehler: string | null;
+  /** Simulationsuhr in Minuten ab 0:00 */
+  zeit: number;
 
   laden: (quelle?: TourDataSource) => Promise<void>;
   planSetzen: (plan: Plan, label: string) => void;
@@ -86,6 +88,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     vorschlaege: [],
     vorschlaegeLaden: false,
     fehler: null,
+    zeit: 6 * 60 + 45,
 
     laden: async (quelle = new DemoTourDataSource()) => {
       const { welt, tag, plan } = await quelle.ladeTag();

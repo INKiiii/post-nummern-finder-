@@ -13,7 +13,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | Phase | Inhalt | Stand |
 |---|---|---|
 | 1 | Setup, Datenmodell, Demo-Welt, Rechenmodell, Optimierer, Tests | fertig |
-| 2 | 3D-Szene statisch, Klick-Panels | offen |
+| 2 | 3D-Szene statisch, Klick-Panels | fertig |
 | 3 | Simulation, Animation, Zeitsteuerung | offen |
 | 4 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D) | offen |
 | 5 | Fahrer-Ansicht, Benachrichtigungen | offen |
@@ -31,8 +31,26 @@ npm run build        # Typprüfung + Produktions-Build nach dist/
 npm run test:browser # nach dem Build: Laptop- und iPhone-Größe, Konsolenfehler, Bildschirmfotos
 ```
 
-Nach Phase 1 zeigt die Startseite eine **Prüfansicht des Rechenkerns** (2D-Karte, Touren,
-Vorschläge, Annahmen). Die 3D-Szene folgt in Phase 2.
+Die Startseite ist der **3D-Leitstand**. Die Prüfansicht des Rechenkerns (2D-Karte, Touren,
+Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
+
+### Bedienung der 3D-Szene
+
+| | Laptop | iPhone |
+|---|---|---|
+| Verschieben | linke Maustaste ziehen | ein Finger |
+| Drehen/Neigen | rechte Maustaste ziehen | zwei Finger drehen/schieben |
+| Zoomen | Mausrad (zum Mauszeiger hin) | zwei Finger spreizen |
+| Auswählen | Klick auf Fahrzeug, Behälter oder Haus | Tippen |
+
+* **3D / Draufsicht** schaltet die Ansicht um, **Basis zeigen** fliegt zu den Rampen.
+* Klick auf ein Objekt (oder eine Tour in der Liste) fliegt sanft dorthin und öffnet das Panel:
+  *Fahrzeug* (Pseudonym, Ladung, Route mit Stopps, Fortschritt, nächster Stopp, Rückkehr,
+  Auslastung), *Behälter* (Inhalt, Ziel, Tour, Rampe, Gangfolge-Position, Status),
+  *Bezirk* (Klick auf ein Haus) und *Basis* (Klick aufs Hallendach).
+* Die Dächer der Häuser zeigen die Farbe ihrer Tour (abschaltbar im Menü).
+* Auf dem Handy rechnet die Szene sparsamer (weniger Schatten und Bäume); im Menü umschaltbar.
+* Escape hebt die Auswahl auf, Strg+Z / Strg+Umschalt+Z = Rückgängig / Wiederholen.
 
 ## Aufbau
 
@@ -51,9 +69,12 @@ src/
     vorschlaege.ts  Vorschläge und „Andere Tour“
     rechenweg.ts    „Wie kommt die Zahl zustande?“
     quellen.ts      Schnittstellen VehiclePositionSource, TourDataSource, NotificationSink
+    sicht.ts        Status von Behältern und Fahrzeugen zu einer Uhrzeit
   worker/           Optimierung im Web Worker
-  state/store.ts    Zustand (zustand): Plan, Annahmen, Rückgängig/Wiederholen
-  ui/               Oberfläche
+  state/            Zustand (zustand): Plan, Annahmen, Verlauf; Auswahl und Kamera
+  szene/            3D-Szene (three.js über @react-three/fiber): Gelände, Straßen,
+                    Häuser und Behälter per Instancing, Basis, Fahrzeuge, Kamera, Licht
+  ui/               Oberfläche: Leitstand, Panels, Beschriftungen, Prüfansicht
 tests/              Vitest
 ```
 

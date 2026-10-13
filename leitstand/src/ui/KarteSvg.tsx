@@ -1,27 +1,8 @@
 import { useMemo } from 'react';
 import type { Kontext, PlanAuswertung } from '../core/modell';
-import type { KnotenId, Plan } from '../core/types';
+import { tourWeg } from '../core/route';
+import type { Plan } from '../core/types';
 import { THEME } from '../theme';
-
-/** Knotenfolge der ganzen Tour: Basis → Bezirke (mit Weg im Bezirk) → Basis */
-export function tourWeg(ctx: Kontext, aus: PlanAuswertung, tourId: string): KnotenId[] {
-  const t = aus.touren[tourId];
-  if (!t.aktiv) return [];
-  const weg: KnotenId[] = [];
-  const anhaengen = (teil: KnotenId[]) => {
-    if (weg.length && teil.length && weg[weg.length - 1] === teil[0]) weg.push(...teil.slice(1));
-    else weg.push(...teil);
-  };
-  for (const s of t.schritte) {
-    anhaengen(ctx.wege.pfad(s.von, s.nach));
-    if (s.schritt.art === 'bezirk') {
-      const bz = ctx.welt.bezirke[ctx.tag.behaelter[s.schritt.behaelterId].zielbezirk];
-      anhaengen(bz.innenWeg);
-    }
-  }
-  if (t.rueckfahrt) anhaengen(ctx.wege.pfad(t.rueckfahrt.von, ctx.welt.basis.knoten));
-  return weg;
-}
 
 const STRASSE: Record<string, { breite: number; farbe: string }> = {
   haupt: { breite: 0.07, farbe: THEME.szene.strasseHaupt },

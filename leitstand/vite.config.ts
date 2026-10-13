@@ -5,7 +5,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   base: './',
   plugins: [react()],
-  build: { target: 'es2022', sourcemap: false },
+  // three.js ist groß; ein Bündel von gut 1 MB ist für die 3D-Szene erwartbar
+  build: { target: 'es2022', sourcemap: false, chunkSizeWarningLimit: 1600 },
   worker: { format: 'es' },
   test: { environment: 'node', include: ['tests/**/*.test.ts'] },
 });
