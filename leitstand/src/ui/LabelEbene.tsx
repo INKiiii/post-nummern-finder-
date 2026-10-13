@@ -14,6 +14,7 @@ export function LabelEbene() {
   const lageVersion = useLeitstand((s) => s.lageVersion);
   const { kameraAbstand: abstand, auswahl, tipp } = useAnsicht();
   const vorschau = useLeitstand((s) => s.vorschau);
+  const nachrichten = useLeitstand((s) => s.nachrichten);
 
   // feste Ankerpunkte
   useLayoutEffect(() => {
@@ -65,6 +66,11 @@ export function LabelEbene() {
               <span className="nr">{t.nr}</span>
               {labelText(p, zeit, besetzt)}
               {vorschau && <VorschauDelta tourId={t.id} />}
+              {nachrichten.some((n) => n.tourId === t.id && n.punkte && n.bestaetigt === null && !n.ersetztDurch) && (
+                <span className="label-brief" title="Umplanung noch nicht bestätigt">
+                  ✉
+                </span>
+              )}
             </div>
           </div>
         );

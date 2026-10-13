@@ -10,6 +10,7 @@
  */
 import { create } from 'zustand';
 import { standardAnnahmen, type Annahmen, type AnnahmeSchluessel } from '../config';
+import { uebergabeZeiten, umplanungsNachrichten, type UmplanungsNachricht } from '../core/benachrichtigung';
 import { DemoTourDataSource } from '../core/demoQuelle';
 import { Lagebild, zusammenfuehren } from '../core/lagebild';
 import { bewertePlan, erstelleKontext, vergleiche, type Delta, type Kontext, type PlanAuswertung } from '../core/modell';
@@ -21,6 +22,8 @@ import { neueUebergaben, type UebergabeInfo } from '../core/uebergabe';
 import { planDiff, type Aenderung, type Vorschlag, type VorschlagArt } from '../core/vorschlaege';
 import { BroadcastFahrerGeraet } from '../geraet/kanal';
 import { KernClient } from '../worker/kernClient';
+import { G } from '../glossar';
+import { useAnsicht } from './ansicht';
 
 export interface VerlaufEintrag {
   plan: Plan;
@@ -40,6 +43,10 @@ export type LogEintrag =
 
 export interface GesendeteNachricht extends FahrerNachricht {
   bestaetigt: number | null;
+  /** bestätigt von einem simulierten Fahrer (Gerät nicht geöffnet) */
+  simuliert?: boolean;
+  /** durch eine neuere Umplanung ersetzt, bevor sie bestätigt wurde */
+  ersetztDurch?: string;
 }
 
 /** Vorschau einer Umplanung: noch nicht übernommen, in 3D und als Karte sichtbar */
@@ -96,6 +103,8 @@ interface LeitstandZustand {
   /** zuletzt gemeldete Geräte (Tour → Zeitpunkt, Date.now) */
   geraete: Record<string, number>;
   vorschau: Vorschau | null;
+  /** Fahrer ohne geöffnetes Gerät bestätigen Nachrichten nach kurzer Zeit selbst (Simulation) */
+  fahrerSimulieren: boolean;
 
   laden: (quelle?: TourDataSource) => Promise<void>;
   planSetzen: (plan: Plan, label: string) => void;
@@ -120,6 +129,9 @@ interface LeitstandZustand {
   /** Vorschau zeigen (hält die Uhr an) bzw. schließen */
   vorschauSetzen: (v: Vorschau | null) => void;
   vorschauUebernehmen: () => void;
+  fahrerSimulierenSetzen: (an: boolean) => void;
+  /** Welche Nachrichten bekäme jede Tour, wenn `neu` den aktuellen Tagesplan ersetzt? */
+  nachrichtenFuer: (neu: Plan, neuAus: PlanAuswertung | null) => UmplanungsNachricht[];
 }
 
 let kern: KernClient | null = null;
@@ -137,6 +149,20 @@ let geraeteNr = 0;
 let nachrichtNr = 0;
 /** lief die Uhr, bevor die Vorschau sie angehalten hat? */
 let laufVorVorschau = false;
+/** Nachrichten, die ein simulierter Fahrer bestätigen wird (Sim-Zeit) */
+let simBestaetigung: Array<{ id: string; tourId: string; faellig: number }> = [];
+
+/** Ist für die Tour gerade ein Geräte-Fenster offen? */
+function geraetOffen(geraete: Record<string, number>, tourId: string): boolean {
+  return !!geraete[tourId] && Date.now() - geraete[tourId] < 15000;
+}
+
+/** gleichmäßig verteilte Zahl 0…1 aus einer Kennung (für reproduzierbare Reaktionszeiten) */
+function streuwert(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 1000) / 1000;
+}
 
 export const useLeitstand = create<LeitstandZustand>((set, get) => {
   /** Kontext und Planbewertung (ganzer Tag) neu berechnen */
@@ -229,9 +255,10 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
   };
 
   const tourDatenSenden = () => {
-    const { plan, tag } = get();
+    const { plan, tag, prognose } = get();
     if (!plan || !tag) return;
-    for (const t of tag.touren) geraet?.post({ typ: 'tour', tourId: t.id, plan: plan.touren[t.id] ?? { schritte: [] } });
+    const zeiten = Object.fromEntries(uebergabeZeiten(prognose));
+    for (const t of tag.touren) geraet?.post({ typ: 'tour', tourId: t.id, plan: plan.touren[t.id] ?? { schritte: [] }, uebergabeZeiten: zeiten });
   };
 
   const geraetEinrichten = () => {
@@ -258,7 +285,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       const { plan, nachrichten, zeit, laeuft, tempo } = get();
       if (m.typ === 'lebenszeichen') set({ geraete: { ...get().geraete, [m.tourId]: Date.now() } });
       if (m.typ !== 'anmelden' || !plan) return;
-      geraet!.post({ typ: 'tour', tourId: m.tourId, plan: plan.touren[m.tourId] ?? { schritte: [] } });
+      geraet!.post({ typ: 'tour', tourId: m.tourId, plan: plan.touren[m.tourId] ?? { schritte: [] }, uebergabeZeiten: Object.fromEntries(uebergabeZeiten(get().prognose)) });
       geraet!.post({
         typ: 'verlauf',
         tourId: m.tourId,
@@ -298,6 +325,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     nachrichten: [],
     geraete: {},
     vorschau: null,
+    fahrerSimulieren: true,
 
     laden: async (quelle = new DemoTourDataSource()) => {
       const { welt, tag, plan } = await quelle.ladeTag();
@@ -313,10 +341,10 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
 
     planSetzen: (plan, label) => {
       get().vorschauSetzen(null);
-      const { verlauf, verlaufIndex, lage, ctx } = get();
+      const { verlauf, verlaufIndex, lage, ctx, plan: alt } = get();
       const neu = [...verlauf.slice(0, verlaufIndex + 1), { plan, label }];
       set({ plan, verlauf: neu, verlaufIndex: neu.length - 1 });
-      planAnwenden(plan, label, lage, ctx);
+      planAnwenden(plan, label, lage, ctx, alt, false);
     },
 
     vorschlagUebernehmen: (v) => {
@@ -382,7 +410,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       if (verlaufIndex <= 0) return;
       const e = verlauf[verlaufIndex - 1];
       set({ plan: e.plan, verlaufIndex: verlaufIndex - 1 });
-      planAnwenden(e.plan, `Rückgängig: ${verlauf[verlaufIndex].label}`, lage, ctx);
+      planAnwenden(e.plan, `Rückgängig: ${verlauf[verlaufIndex].label}`, lage, ctx, verlauf[verlaufIndex].plan, true);
     },
 
     wiederholen: () => {
@@ -391,7 +419,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       if (verlaufIndex >= verlauf.length - 1) return;
       const e = verlauf[verlaufIndex + 1];
       set({ plan: e.plan, verlaufIndex: verlaufIndex + 1 });
-      planAnwenden(e.plan, e.label, lage, ctx);
+      planAnwenden(e.plan, e.label, lage, ctx, verlauf[verlaufIndex].plan, false);
     },
 
     zumStartplan: () => {
@@ -434,6 +462,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
         geraet?.post({ typ: 'zeit', zeit: t, laeuft: true, tempo });
       }
       if (wichtig || t - letzteLive >= 5) liveAktualisieren();
+      simuliertBestaetigen(t);
     },
 
     startPause: () => {
@@ -458,6 +487,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
         set({ zeit: ziel, lageVersion: get().lageVersion + 1 });
         geraet?.post({ typ: 'neustart' });
         liveAktualisieren();
+        simuliertBestaetigen(ziel);
       } else {
         // zurück: Tag aus den Ereignissen neu abspielen (spätere Umplanungen entfallen)
         tagAufbauen(ziel);
@@ -471,6 +501,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       const { startplan } = get();
       if (!startplan) return;
       chronik = [{ zeit: -Infinity, plan: startplan, label: 'Startplan' }];
+      simBestaetigung = [];
       set({ laeuft: false, nachrichten: [], verlauf: [{ plan: startplan, label: 'Startplan' }], verlaufIndex: 0 });
       tagAufbauen(TAG_BEGINN);
     },
@@ -482,15 +513,64 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     nachrichtSenden: (tourId, titel, text) => {
-      const n: GesendeteNachricht = { id: `N${++nachrichtNr}`, tourId, zeit: simUhr.zeit, titel, text, bestaetigungNoetig: true, bestaetigt: null };
-      set({ nachrichten: [...get().nachrichten, n] });
-      geraet?.senden(n);
-      logAnhaengen([{ quelle: 'geraet', nr: ++geraeteNr, zeit: simUhr.zeit, art: 'NACHRICHT', tourId, text: `${titel}: ${text}` }]);
+      senden({ tourId, titel, text });
+    },
+
+    fahrerSimulierenSetzen: (an) => set({ fahrerSimulieren: an }),
+
+    nachrichtenFuer: (neu, neuAus) => {
+      const { ctxLive, plan, prognose, lage } = get();
+      if (!ctxLive || !plan) return [];
+      return umplanungsNachrichten(ctxLive, plan, neu, neuAus, { altAus: prognose, uebergabenErledigt: lage?.uebergabenErledigt });
     },
   };
 
+  /** Nachricht an das Gerät einer Tour (bei Umplanung mit Einzelpunkten; ersetzt offene Umplanungen) */
+  function senden(x: { tourId: string; titel: string; text: string; punkte?: GesendeteNachricht['punkte'] }): GesendeteNachricht {
+    const id = `N${++nachrichtNr}`;
+    const alt = get().nachrichten;
+    const ersetzt = x.punkte ? alt.filter((n) => n.tourId === x.tourId && n.punkte && n.bestaetigt === null && !n.ersetztDurch).map((n) => n.id) : [];
+    const n: GesendeteNachricht = { id, tourId: x.tourId, zeit: simUhr.zeit, titel: x.titel, text: x.text, punkte: x.punkte, ersetzt, bestaetigungNoetig: true, bestaetigt: null };
+    set({ nachrichten: [...alt.map((m) => (ersetzt.includes(m.id) ? { ...m, ersetztDurch: id } : m)), n] });
+    simBestaetigung = simBestaetigung.filter((s) => !ersetzt.includes(s.id));
+    geraet?.senden(n);
+    const kurz = x.punkte ? `${x.titel}: ${x.punkte.map((p) => p.text).join(' · ')}` : `${x.titel}: ${x.text}`;
+    logAnhaengen([{ quelle: 'geraet', nr: ++geraeteNr, zeit: simUhr.zeit, art: 'NACHRICHT', tourId: x.tourId, text: kurz }]);
+    // ohne geöffnetes Gerät: ein simulierter Fahrer liest und bestätigt nach 1–4 Minuten
+    if (get().fahrerSimulieren && !geraetOffen(get().geraete, x.tourId)) simBestaetigung.push({ id, tourId: x.tourId, faellig: simUhr.zeit + 1 + 3 * streuwert(id + x.tourId) });
+    return n;
+  }
+
+  /** fällige simulierte Bestätigungen verbuchen */
+  function simuliertBestaetigen(bis: number) {
+    if (!simBestaetigung.length) return;
+    const faellig = simBestaetigung.filter((s) => s.faellig <= bis);
+    if (!faellig.length) return;
+    simBestaetigung = simBestaetigung.filter((s) => s.faellig > bis);
+    const { nachrichten, geraete } = get();
+    const jetzt = faellig.filter((f) => !geraetOffen(geraete, f.tourId));
+    if (!jetzt.length) return;
+    set({ nachrichten: nachrichten.map((n) => { const f = jetzt.find((x) => x.id === n.id); return f && n.bestaetigt === null ? { ...n, bestaetigt: f.faellig, simuliert: true } : n; }) });
+    logAnhaengen(
+      jetzt.map((f): LogEintrag => ({ quelle: 'geraet', nr: ++geraeteNr, zeit: f.faellig, art: 'BESTAETIGUNG', tourId: f.tourId, text: `„${nachrichten.find((n) => n.id === f.id)?.titel ?? 'Nachricht'}“ verstanden (simuliert)` })),
+    );
+  }
+
+  /** nach einer Umplanung: jede betroffene Tour bekommt eine Nachricht aufs Gerät */
+  function benachrichtigen(alt: Plan, neu: Plan, altAus: PlanAuswertung | null, rueckgaengig: boolean) {
+    const { ctxLive, prognose, lage } = get();
+    if (!ctxLive) return;
+    const liste = umplanungsNachrichten(ctxLive, alt, neu, prognose, { altAus, uebergabenErledigt: lage?.uebergabenErledigt, rueckgaengig });
+    for (const m of liste) senden({ tourId: m.tourId, titel: m.titel, text: m.text, punkte: m.punkte });
+    if (liste.length) {
+      const namen = liste.map((m) => `${G.tour} ${ctxLive.tag.touren.find((t) => t.id === m.tourId)?.nr}`);
+      useAnsicht.getState().hinweisSetzen(`Nachricht an ${namen.length > 1 ? `${namen.slice(0, -1).join(', ')} und ${namen[namen.length - 1]}` : namen[0]} gesendet.`);
+    }
+  }
+
   /** neuen Plan in Lagebild und Simulation übernehmen (gilt ab jetzt) */
-  function planAnwenden(plan: Plan, label: string, lage: Lagebild | null, ctx: Kontext | null) {
+  function planAnwenden(plan: Plan, label: string, lage: Lagebild | null, ctx: Kontext | null, alt: Plan | null, rueckgaengig: boolean) {
+    const altAus = get().prognose;
     planBewerten();
     if (lage && ctx && sim) {
       const t = simUhr.zeit;
@@ -509,5 +589,6 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       }
     }
     tourDatenSenden();
+    if (alt && alt !== plan) benachrichtigen(alt, plan, altAus, rueckgaengig);
   }
 });

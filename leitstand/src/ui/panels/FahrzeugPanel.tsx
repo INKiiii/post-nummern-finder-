@@ -210,9 +210,22 @@ export function FahrzeugPanel({ tourId }: { tourId: string }) {
         {meine.length > 0 && (
           <ul className="nachrichten">
             {[...meine].reverse().map((n) => (
-              <li key={n.id}>
+              <li key={n.id} className={n.ersetztDurch ? 'ersetzt' : ''}>
                 <span className="uhr">{fmtUhr(n.zeit)}</span> {n.titel}
-                <span className={n.bestaetigt !== null ? 'gut' : 'leise'}>{n.bestaetigt !== null ? ` · verstanden ${fmtUhr(n.bestaetigt)}` : ' · noch nicht bestätigt'}</span>
+                <span className={n.bestaetigt !== null ? 'gut' : n.ersetztDurch ? 'leise' : 'warnung'}>
+                  {n.bestaetigt !== null
+                    ? ` · verstanden ${fmtUhr(n.bestaetigt)}${n.simuliert ? ' (simuliert)' : ''}`
+                    : n.ersetztDurch
+                      ? ' · ersetzt durch neuere Umplanung'
+                      : ' · noch nicht bestätigt'}
+                </span>
+                {n.punkte && (
+                  <ul className="nachricht-punkte">
+                    {n.punkte.map((p, i) => (
+                      <li key={i}>{p.text}</li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

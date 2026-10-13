@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { G } from '../../glossar';
 import { DemoTourDataSource } from '../../core/demoQuelle';
 import { fmtUhr } from '../../core/format';
+import type { PunktArt } from '../../core/benachrichtigung';
 import type { FahrerNachricht } from '../../core/quellen';
 import type { ScanEreignis } from '../../core/scan';
 import { fmtUhrSek } from '../../core/scan';
@@ -60,6 +61,7 @@ type Seite = 'start' | 'stopps' | 'nachrichten' | 'scans';
 function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
   const tour = daten.tag.touren.find((t) => t.id === tourId);
   const [plan, setPlan] = useState<TourPlan | null>(null);
+  const [zeiten, setZeiten] = useState<Record<string, number>>({});
   const [scans, setScans] = useState<ScanEreignis[]>([]);
   const [uhr, setUhr] = useState<{ zeit: number; laeuft: boolean } | null>(null);
   const [nachrichten, setNachrichten] = useState<FahrerNachricht[]>([]);
@@ -74,6 +76,7 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
       switch (m.typ) {
         case 'tour':
           setPlan(m.plan);
+          setZeiten(m.uebergabeZeiten ?? {});
           break;
         case 'scan':
           setScans((s) => [...s, m.e]);
@@ -117,14 +120,26 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
     };
   }, [tourId]);
 
-  // Stoppliste aus Plan und eigenen Scans
-  const stopps = useMemo(() => {
+  // ersetzte Umplanungen brauchen keine Bestätigung mehr
+  const ersetzt = useMemo(() => new Set(nachrichten.flatMap((n) => n.ersetzt ?? [])), [nachrichten]);
+  // Behälter, die mit einer (gültigen) Umplanung neu dazugekommen sind
+  const neuDurchUmplanung = useMemo(
+    () => new Set(nachrichten.filter((n) => !ersetzt.has(n.id)).flatMap((n) => (n.punkte ?? []).filter((p) => p.art === 'neu' && p.behaelterId).map((p) => p.behaelterId!))),
+    [nachrichten, ersetzt],
+  );
+
+  // Stoppliste aus Plan und eigenen Scans, mit Übergaben an Treffpunkten dazwischen
+  const zeilen = useMemo(() => {
     if (!plan) return [];
     const zugestellt = new Map<string, string>();
     for (const e of scans) if (e.art === 'ZUSTELLUNG' || e.art === 'NICHT_ZUGESTELLT') zugestellt.set(e.sendung, e.art);
-    const liste: Array<{ stoppId: number; adresse: string; bezirk: string; pakete: number; offenePakete: number; briefe: number; erledigt: boolean }> = [];
+    const liste: Zeile[] = [];
     for (const s of plan.schritte) {
-      if (s.art !== 'bezirk') continue;
+      if (s.art === 'uebergabe') {
+        const partner = daten.tag.touren.find((t) => t.id === s.partner);
+        liste.push({ art: 'uebergabe', id: s.id, treffpunkt: s.treffpunktName, zeit: zeiten[s.id] ?? null, partner: partner ? `${G.tour} ${partner.nr}` : s.partner, abgeben: s.abgeben, aufnehmen: s.aufnehmen, erledigt: false });
+        continue;
+      }
       const b = daten.tag.behaelter[s.behaelterId];
       const bz = daten.welt.bezirke[b.zielbezirk];
       const mengen = stoppMengen(daten.welt, daten.tag, s.behaelterId);
@@ -132,7 +147,9 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
       for (const st of bz.stopps) {
         const hier = pakete.filter((p) => p.stoppId === st);
         liste.push({
+          art: 'stopp',
           stoppId: st,
+          behaelterId: s.behaelterId,
           adresse: stoppAdresse(daten.welt, st),
           bezirk: bz.name,
           pakete: hier.length,
@@ -145,21 +162,32 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
     // erledigt: alle Pakete gescannt oder ein späterer Stopp hatte schon einen Scan
     let letzter = -1;
     liste.forEach((x, i) => {
-      if (x.pakete > 0 && x.offenePakete < x.pakete) letzter = i;
+      if (x.art === 'stopp' && x.pakete > 0 && x.offenePakete < x.pakete) letzter = i;
     });
+    // Übergabe erledigt: übernommene Behälter wurden unterwegs ins Fahrzeug gescannt
+    const unterwegs = scans.findIndex((e) => e.art === 'TOUR_START');
+    const umgeladen = new Set(scans.slice(unterwegs < 0 ? scans.length : unterwegs).flatMap((e) => (e.art === 'BEHAELTER_VERLADEN' ? [e.behaelter] : [])));
     liste.forEach((x, i) => {
-      x.erledigt = i < letzter || (x.pakete > 0 && x.offenePakete === 0);
+      if (x.art === 'stopp') x.erledigt = i < letzter || (x.pakete > 0 && x.offenePakete === 0);
+      else x.erledigt = i < letzter || (x.aufnehmen.length > 0 && x.aufnehmen.every((b) => umgeladen.has(b))) || (x.zeit !== null && !!uhr && uhr.zeit > x.zeit + 15);
     });
     return liste;
-  }, [plan, scans, daten]);
+  }, [plan, scans, daten, zeiten, uhr]);
 
+  const stopps = zeilen.filter((x): x is StoppZeile => x.art === 'stopp');
   const tourGestartet = scans.some((e) => e.art === 'TOUR_START');
   const tourEnde = scans.some((e) => e.art === 'TOUR_ENDE');
+  const naechsteZeile = zeilen.find((x) => !x.erledigt);
   const naechster = stopps.find((x) => !x.erledigt);
-  const offen = nachrichten.filter((n) => n.bestaetigungNoetig && !bestaetigt.has(n.id));
+  const offen = nachrichten.filter((n) => n.bestaetigungNoetig && !bestaetigt.has(n.id) && !ersetzt.has(n.id));
   const pakete = scans.filter((e) => e.art === 'PAKET_IN_FAHRZEUG').length;
   const zugestellt = scans.filter((e) => e.art === 'ZUSTELLUNG').length;
   const nicht = scans.filter((e) => e.art === 'NICHT_ZUGESTELLT').length;
+
+  // Stoppliste: gleich beim nächsten Halt anfangen
+  useEffect(() => {
+    if (seite === 'stopps') document.querySelector('.geraet-liste .naechster')?.scrollIntoView({ block: 'center' });
+  }, [seite]);
 
   if (!tour) return <div className="geraet-leer">Unbekannte {G.tour}</div>;
 
@@ -179,25 +207,36 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
       <div className="geraet-inhalt">
         {seite === 'start' && (
           <>
-            <div className="geraet-karte gross">
-              <div className="geraet-klein">{tourEnde ? 'Tour beendet' : tourGestartet ? 'Nächster Stopp' : 'Vor der Abfahrt'}</div>
-              {naechster && !tourEnde ? (
-                <>
-                  <div className="geraet-adresse">{naechster.adresse}</div>
-                  <div className="geraet-klein">{naechster.bezirk}</div>
-                  <div className="geraet-mengen">
-                    <span>
-                      <b>{naechster.offenePakete}</b> {naechster.offenePakete === 1 ? G.paket : G.pakete}
-                    </span>
-                    <span>
-                      ca. <b>{naechster.briefe}</b> {G.briefe}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <div className="geraet-adresse">{tourEnde ? 'Zurück an der Basis' : '–'}</div>
-              )}
-            </div>
+            {naechsteZeile?.art === 'uebergabe' && !tourEnde ? (
+              <div className="geraet-karte gross uebergabe">
+                <div className="geraet-klein">Nächster Halt: Übergabe{naechsteZeile.zeit !== null ? ` um ${fmtUhr(naechsteZeile.zeit)}` : ''}</div>
+                <div className="geraet-adresse">{G.treffpunkt} {naechsteZeile.treffpunkt}</div>
+                <UebergabeText z={naechsteZeile} />
+              </div>
+            ) : (
+              <div className="geraet-karte gross">
+                <div className="geraet-klein">{tourEnde ? 'Tour beendet' : tourGestartet ? 'Nächster Stopp' : 'Vor der Abfahrt'}</div>
+                {naechster && !tourEnde ? (
+                  <>
+                    <div className="geraet-adresse">
+                      {naechster.adresse}
+                      {neuDurchUmplanung.has(naechster.behaelterId) && <span className="geraet-neu">neu</span>}
+                    </div>
+                    <div className="geraet-klein">{naechster.bezirk}</div>
+                    <div className="geraet-mengen">
+                      <span>
+                        <b>{naechster.offenePakete}</b> {naechster.offenePakete === 1 ? G.paket : G.pakete}
+                      </span>
+                      <span>
+                        ca. <b>{naechster.briefe}</b> {G.briefe}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="geraet-adresse">{tourEnde ? 'Zurück an der Basis' : '–'}</div>
+                )}
+              </div>
+            )}
             <div className="geraet-zahlen">
               <div>
                 <b>{pakete}</b>
@@ -238,17 +277,32 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
         {seite === 'stopps' && (
           <Unterseite titel="Stoppliste" zurueck={() => setSeite('start')}>
             <ol className="geraet-liste">
-              {stopps.map((x, i) => (
-                <li key={`${x.stoppId}-${i}`} className={x.erledigt ? 'erledigt' : x === naechster ? 'naechster' : ''}>
-                  <span className="haken">{x.erledigt ? '✓' : i + 1}</span>
-                  <span>
-                    <b>{x.adresse}</b>
-                    <small>
-                      {x.pakete ? `${x.pakete} ${x.pakete === 1 ? G.paket : G.pakete} · ` : ''}ca. {x.briefe} {G.briefe}
-                    </small>
-                  </span>
-                </li>
-              ))}
+              {zeilen.map((x, i) =>
+                x.art === 'uebergabe' ? (
+                  <li key={`u-${x.id}`} className={`uebergabe ${x.erledigt ? 'erledigt' : x === naechsteZeile ? 'naechster' : ''}`}>
+                    <span className="haken">{x.erledigt ? '✓' : '⇄'}</span>
+                    <span>
+                      <b>
+                        Übergabe{x.zeit !== null ? ` ${fmtUhr(x.zeit)}` : ''} · {x.treffpunkt}
+                      </b>
+                      <UebergabeText z={x} klein />
+                    </span>
+                  </li>
+                ) : (
+                  <li key={`${x.stoppId}-${i}`} className={x.erledigt ? 'erledigt' : x === naechsteZeile ? 'naechster' : ''}>
+                    <span className="haken">{x.erledigt ? '✓' : stopps.indexOf(x) + 1}</span>
+                    <span>
+                      <b>
+                        {x.adresse}
+                        {neuDurchUmplanung.has(x.behaelterId) && <span className="geraet-neu">neu</span>}
+                      </b>
+                      <small>
+                        {x.pakete ? `${x.pakete} ${x.pakete === 1 ? G.paket : G.pakete} · ` : ''}ca. {x.briefe} {G.briefe}
+                      </small>
+                    </span>
+                  </li>
+                ),
+              )}
             </ol>
           </Unterseite>
         )}
@@ -258,12 +312,12 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
             {nachrichten.length === 0 && <p className="geraet-hinweis">Keine Nachrichten.</p>}
             <ol className="geraet-liste">
               {[...nachrichten].reverse().map((n) => (
-                <li key={n.id}>
-                  <span className="haken">{bestaetigt.has(n.id) ? '✓' : '!'}</span>
+                <li key={n.id} className={ersetzt.has(n.id) ? 'erledigt' : ''}>
+                  <span className="haken">{bestaetigt.has(n.id) ? '✓' : ersetzt.has(n.id) ? '–' : '!'}</span>
                   <span>
                     <b>{n.titel}</b>
                     <small>
-                      {fmtUhr(n.zeit)} · {n.text}
+                      {fmtUhr(n.zeit)} · {ersetzt.has(n.id) ? 'ersetzt durch eine neuere Umplanung' : n.punkte ? n.punkte.map((p) => p.text).join(' · ') : n.text}
                     </small>
                   </span>
                 </li>
@@ -295,9 +349,22 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
 
       {offen.length > 0 && (
         <div className="geraet-meldung" role="alertdialog" aria-label="Neue Nachricht">
-          <div className="geraet-klein">Neue Nachricht vom {G.leitstand}</div>
+          <div className="geraet-klein">
+            {offen[0].punkte ? 'Neue Umplanung' : 'Neue Nachricht'} vom {G.leitstand} · {fmtUhr(offen[0].zeit)}
+          </div>
           <div className="geraet-meldung-titel">{offen[0].titel}</div>
-          <div className="geraet-meldung-text">{offen[0].text}</div>
+          {offen[0].punkte ? (
+            <ul className="geraet-punkte">
+              {offen[0].punkte.map((p, i) => (
+                <li key={i} className={`punkt-${p.art}`}>
+                  <span className="symbol">{SYMBOL[p.art]}</span>
+                  <span>{p.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="geraet-meldung-text">{offen[0].text}</div>
+          )}
           <button
             className="geraet-verstanden"
             onClick={() => {
@@ -322,4 +389,49 @@ function Unterseite({ titel, zurueck, children }: { titel: string; zurueck: () =
       {children}
     </div>
   );
+}
+
+interface StoppZeile {
+  art: 'stopp';
+  stoppId: number;
+  behaelterId: string;
+  adresse: string;
+  bezirk: string;
+  pakete: number;
+  offenePakete: number;
+  briefe: number;
+  erledigt: boolean;
+}
+
+interface UebergabeZeile {
+  art: 'uebergabe';
+  id: string;
+  treffpunkt: string;
+  zeit: number | null;
+  partner: string;
+  abgeben: string[];
+  aufnehmen: string[];
+  erledigt: boolean;
+}
+
+type Zeile = StoppZeile | UebergabeZeile;
+
+const SYMBOL: Record<PunktArt, string> = {
+  neu: '+',
+  abgeben: '→',
+  entfaellt: '−',
+  bleibt: '•',
+  uebergabeEntfaellt: '×',
+  reihenfolge: '↕',
+  tourEntfaellt: '×',
+  tourNeu: '+',
+};
+
+/** Was bei einer Übergabe zu tun ist */
+function UebergabeText({ z, klein = false }: { z: UebergabeZeile; klein?: boolean }) {
+  const teile = [
+    z.abgeben.length ? `${G.behaelter} ${z.abgeben.join(', ')} abgeben an ${z.partner}` : '',
+    z.aufnehmen.length ? `${G.behaelter} ${z.aufnehmen.join(', ')} übernehmen von ${z.partner}` : '',
+  ].filter(Boolean);
+  return klein ? <small>{teile.join(' · ')}</small> : <div className="geraet-klein">{teile.join(' · ')}</div>;
 }

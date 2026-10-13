@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { G } from '../../glossar';
 import { fmtDauer, fmtUhr } from '../../core/format';
 import { VORSCHLAG_NAME, tourName } from '../../core/vorschlaege';
@@ -12,6 +13,8 @@ export function VorschauKarte() {
   const ctx = useLeitstand((s) => s.ctxLive);
   const uebernehmen = useLeitstand((s) => s.vorschauUebernehmen);
   const setzen = useLeitstand((s) => s.vorschauSetzen);
+  const nachrichtenFuer = useLeitstand((s) => s.nachrichtenFuer);
+  const nachrichten = useMemo(() => (v ? nachrichtenFuer(v.tagesplan, v.neu) : []), [v, nachrichtenFuer]);
   if (!v || !ctx) return null;
   const touren = ctx.tag.touren.filter((t) => v.delta.betroffen.includes(t.id));
   return (
@@ -68,6 +71,17 @@ export function VorschauKarte() {
         </div>
       )}
       {v.warnung && <div className="warnung klein">⚠ {v.warnung}</div>}
+      {nachrichten.length > 0 && (
+        <div className="vorschau-nachrichten">
+          <div className="leise klein">Beim Übernehmen geht eine Nachricht an das Gerät von:</div>
+          {nachrichten.map((m) => (
+            <div key={m.tourId} className="vorschau-nachricht" style={{ ['--tourfarbe' as string]: ctx.tag.touren.find((t) => t.id === m.tourId)?.farbe }}>
+              <b>{tourName(ctx, m.tourId)}</b>
+              <span>{m.punkte.map((p) => p.text).join(' · ')}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="vorschau-fuss">
         <span className="leise klein">Die Uhr steht, solange die Vorschau offen ist.</span>
         <div className="knopf-reihe">

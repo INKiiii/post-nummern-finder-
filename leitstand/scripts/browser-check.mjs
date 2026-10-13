@@ -236,6 +236,25 @@ try {
     await geraet.getByRole('button', { name: 'Verstanden' }).click();
     await page.waitForSelector('.nachrichten .gut', { timeout: 10000 });
     await bild(page, `${name}-3d-bestaetigt`);
+
+    s('Umplanung an das Gerät');
+    await page.bringToFront();
+    const umplanen = page.locator('.panel-abschnitt', { has: page.locator('h3', { hasText: 'Umplanen' }) });
+    await umplanen.locator('.chips .chip').first().click();
+    await page.waitForSelector('.optionen .option:not([disabled])', { timeout: 10000 });
+    await page.locator('.optionen .option:not([disabled])').first().click();
+    await page.waitForSelector('.vorschau-karte .vorschau-nachrichten');
+    if (!(await page.locator('.vorschau-nachricht', { hasText: 'Übergabe' }).count())) fehler.push(`[${name}] Vorschau nennt keine Übergabe-Nachricht`);
+    await page.getByRole('button', { name: 'Übernehmen', exact: true }).last().click();
+    await geraet.waitForSelector('.geraet-meldung .geraet-punkte', { timeout: 10000 });
+    await bild(geraet, `${name}-geraet-umplanung`);
+    await geraet.getByRole('button', { name: 'Verstanden' }).click();
+    await page
+      .waitForFunction(() => window.__leitstand.getState().nachrichten.filter((n) => n.punkte && n.tourId === 'T2').every((n) => n.bestaetigt !== null || n.ersetztDurch), null, { timeout: 10000 })
+      .catch(() => fehler.push(`[${name}] Bestätigung der Umplanung kommt im Leitstand nicht an`));
+    await geraet.getByRole('button', { name: /Stoppliste/ }).click();
+    if (!(await geraet.locator('.geraet-liste li.uebergabe').count())) fehler.push(`[${name}] Stoppliste des Geräts zeigt die Übergabe nicht`);
+    await bild(geraet, `${name}-geraet-stoppliste`);
     await geraet.close();
 
     if (!schmal) {

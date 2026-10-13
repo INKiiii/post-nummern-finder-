@@ -166,6 +166,7 @@ export function Leitstand() {
         const schicht = s.annahmen.schichtStunden * 60;
         const auslastung = pa?.aktiv ? pa.dauer / schicht : 0;
         const aktiv = a?.art === 'fahrzeug' && a.id === t.id;
+        const briefOffen = s.nachrichten.some((n) => n.tourId === t.id && n.punkte && n.bestaetigt === null && !n.ersetztDurch);
         return (
           <button
             key={t.id}
@@ -177,7 +178,14 @@ export function Leitstand() {
           >
             <span className="farbe" />
             <span className="name">
-              <b>{tourName(ctx, t.id)}</b>
+              <b>
+                {tourName(ctx, t.id)}
+                {briefOffen && (
+                  <span className="brief-offen" title="Umplanung gesendet, noch nicht bestätigt">
+                    ✉ offen
+                  </span>
+                )}
+              </b>
               <span className="leise">{pa?.aktiv ? p.statusText : 'entfällt'}</span>
             </span>
             <span className="rechts">
@@ -252,6 +260,7 @@ export function Leitstand() {
                 <button onClick={() => setInfo(true)}>Info und Datenschutz</button>
                 <button onClick={() => setEreignisse(!ereignisse)}>{ereignisse ? '✓ ' : ''}Ereignisstrom einblenden</button>
                 <button onClick={() => ansicht.tourDaecherSetzen(!ansicht.tourDaecher)}>{ansicht.tourDaecher ? '✓ ' : ''}Dächer in Tourfarbe</button>
+                <button onClick={() => s.fahrerSimulierenSetzen(!s.fahrerSimulieren)}>{s.fahrerSimulieren ? '✓ ' : ''}Fahrer ohne Geräte-Fenster simulieren</button>
                 <button onClick={() => ansicht.qualitaetSetzen(ansicht.qualitaet === 'hoch' ? 'niedrig' : 'hoch')}>
                   Grafik: {ansicht.qualitaet === 'hoch' ? 'hoch' : 'sparsam'} (umschalten)
                 </button>

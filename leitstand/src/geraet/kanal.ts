@@ -12,7 +12,7 @@ export const KANAL = 'zustell-leitstand-geraete-v1';
 export type VonZentrale =
   | { typ: 'nachricht'; n: FahrerNachricht }
   | { typ: 'scan'; tourId: string; e: ScanEreignis }
-  | { typ: 'tour'; tourId: string; plan: TourPlan }
+  | { typ: 'tour'; tourId: string; plan: TourPlan; uebergabeZeiten?: Record<string, number> }
   | { typ: 'zeit'; zeit: number; laeuft: boolean; tempo: number }
   | { typ: 'verlauf'; tourId: string; scans: ScanEreignis[]; nachrichten: FahrerNachricht[]; bestaetigt: string[] }
   | { typ: 'neustart' };

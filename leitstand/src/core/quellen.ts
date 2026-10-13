@@ -7,6 +7,7 @@
  *  - VehiclePositionSource: die POSITION-Meldungen aus dem Scan-Strom
  *  - FahrerGeraet: Nachrichten an das Gerät der Tour und Bestätigungen zurück
  */
+import type { NachrichtPunkt } from './benachrichtigung';
 import type { ScanEreignis, ScanQuelle } from './scan';
 import type { Plan, Tag, Welt } from './types';
 
@@ -37,6 +38,10 @@ export interface FahrerNachricht {
   titel: string;
   text: string;
   bestaetigungNoetig: boolean;
+  /** Umplanung: die einzelnen Änderungen (für die Anzeige auf dem Gerät) */
+  punkte?: NachrichtPunkt[];
+  /** frühere, noch unbestätigte Umplanungen, die diese Nachricht ersetzt */
+  ersetzt?: string[];
 }
 
 export type GeraeteMeldung =

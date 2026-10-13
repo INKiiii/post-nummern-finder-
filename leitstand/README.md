@@ -17,7 +17,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | 3 | Datenquellen-Schicht: Scan-Ereignisse, Lagebild, Fahrergerät, Seite „Datenquellen“ | fertig |
 | 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | fertig |
 | 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D), Übergaben am Treffpunkt | fertig |
-| 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | offen |
+| 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | fertig |
 | 7 | Szenarien | offen |
 | 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
 
@@ -119,6 +119,7 @@ src/
     simulation.ts   Adapter „SimulierteScanner“: erzeugt nur Scan-Ereignisse
     lagebild.ts     Lage aus dem Ereignisstrom: Positionen, Behälter, Fortschritt, Prognosen
     uebergabe.ts    Übergaben am Treffpunkt planen (abgeben, tauschen)
+    benachrichtigung.ts  Nachrichten an die Fahrer/innen bei Umplanung
     route.ts        Routengeometrie und Zeitpläne entlang der Route
     sendungen.ts    Pakete je Stopp, Briefe geschätzt nach Haushalten, erfundene Adressen
   worker/           Optimierung im Web Worker
@@ -179,6 +180,29 @@ Der Leitstand nutzt nur Daten, die bei der Arbeit ohnehin entstehen. Alles, was 
    „verstanden 10:03“.
 5. Menü → „Datenquellen“; dort lässt sich das Barcode-Etikett am Behälter ab- und anschalten.
 
+### Benachrichtigungen an die Fahrer/innen
+
+Jede übernommene Umplanung (auch Rückgängig) schickt jeder betroffenen Tour eine Nachricht
+aufs Gerät – über die Schnittstelle `FahrerGeraet`, kurz genug fürs Scanner-Display:
+
+```
+Neu: Behälter LI-S, Übergabe 13:10 am Treffpunkt Deichweg (von Tour 2)
+Abgeben: Behälter BI-W, Übergabe 11:15 am Treffpunkt Mühlenplatz (an Tour 4)
+Entfällt: Behälter AL-S (übernimmt Tour 2)
+Neue Reihenfolge: LI-N → LI-M → LI-S
+```
+
+* Die **Vorschau** zeigt schon vorher, wer welche Nachricht bekommt.
+* Auf dem **Gerät** (`#/fahrer/T1`) erscheint die Umplanung als große Karte mit
+  **Verstanden**; die Stoppliste zeigt Übergaben mit Uhrzeit und markiert neue Stopps.
+* Im **Leitstand** stehen offene Nachrichten als „✉ offen“ in der Tourliste und als ✉ am
+  Fahrzeug; das Fahrzeug-Panel zeigt den Verlauf („verstanden 10:03“). Eine neuere Umplanung
+  ersetzt eine noch nicht bestätigte.
+* Ist für eine Tour kein Geräte-Fenster offen, bestätigt ein **simulierter Fahrer** nach
+  1–4 Minuten Simulationszeit, gekennzeichnet mit „(simuliert)“. Abschaltbar im Menü
+  („Fahrer ohne Geräte-Fenster simulieren“).
+* Erzeugt werden die Nachrichten in `src/core/benachrichtigung.ts` (getestet).
+
 ### Übergaben: auch nur aus Scans
 
 Eine Übergabe ist im Plan ein Schritt bei beiden Touren (Treffpunkt, wer was abgibt). Das
@@ -187,6 +211,18 @@ Zeitpunkt (`src/core/uebergabe.ts`). Die Simulation fährt beide Fahrzeuge hin u
 Umladen die üblichen Scans im übernehmenden Fahrzeug (`BEHAELTER_VERLADEN` mit Etikett,
 sonst die `PAKET_IN_FAHRZEUG`-Scans der Pakete). Daran erkennt das Lagebild, dass die
 Übergabe stattgefunden hat – es gibt dafür kein eigenes Ereignis und keine neue Hardware.
+
+### So testest du Phase 6
+
+1. `npm run dev`, Leitstand öffnen; Menü → „Geräte-Ansicht (Fahrer)“ öffnet ein zweites
+   Fenster, dort **Tour 1** wählen. Beide Fenster nebeneinander.
+2. Im Leitstand Zeitleiste auf 10:00 → **Vorschläge** → „Überlastung Tour 1 abbauen“ →
+   In 3D ansehen. Unten steht, welche Nachricht Tour 1 und Tour 4 bekommen. **Übernehmen**.
+3. Auf dem Gerät erscheint „Umplanung – Abgeben: Behälter …, Übergabe … am Treffpunkt …“.
+   Im Leitstand stehen Tour 1 und Tour 4 auf „✉ offen“. Auf dem Gerät **Verstanden** →
+   im Leitstand ist Tour 1 bestätigt; ▶ starten → Tour 4 (ohne Gerät) bestätigt simuliert.
+4. Gerät → Stoppliste: die Übergabe steht mit Uhrzeit zwischen den Stopps.
+5. ↶ (Rückgängig) → beide bekommen „Umplanung zurückgenommen“.
 
 ### So testest du Phase 5
 
