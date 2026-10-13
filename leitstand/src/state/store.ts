@@ -17,12 +17,14 @@ import { bewertePlan, erstelleKontext, vergleiche, type Delta, type Kontext, typ
 import type { FahrerNachricht, TourDataSource } from '../core/quellen';
 import type { ScanEreignis } from '../core/scan';
 import { SimulierteScanner } from '../core/simulation';
+import { mitAusfall, mitSperrung, STAU_STRASSE, SZENARIEN, type SzenarioArt } from '../core/szenarien';
 import type { Plan, StartZustand, Tag, Welt } from '../core/types';
 import { neueUebergaben, type UebergabeInfo } from '../core/uebergabe';
 import { planDiff, type Aenderung, type Vorschlag, type VorschlagArt } from '../core/vorschlaege';
 import { BroadcastFahrerGeraet } from '../geraet/kanal';
 import { KernClient } from '../worker/kernClient';
 import { G } from '../glossar';
+import { fmtUhr } from '../core/format';
 import { useAnsicht } from './ansicht';
 
 export interface VerlaufEintrag {
@@ -47,6 +49,15 @@ export interface GesendeteNachricht extends FahrerNachricht {
   simuliert?: boolean;
   /** durch eine neuere Umplanung ersetzt, bevor sie bestätigt wurde */
   ersetztDurch?: string;
+}
+
+export interface AktivesSzenario {
+  art: SzenarioArt;
+  titel: string;
+  tourId?: string;
+  springer?: boolean;
+  /** Sim-Zeit, ab der es gilt (Ausfall und Spitzentag: ganzer Tag) */
+  seit: number;
 }
 
 /** Vorschau einer Umplanung: noch nicht übernommen, in 3D und als Karte sichtbar */
@@ -105,6 +116,8 @@ interface LeitstandZustand {
   vorschau: Vorschau | null;
   /** Fahrer ohne geöffnetes Gerät bestätigen Nachrichten nach kurzer Zeit selbst (Simulation) */
   fahrerSimulieren: boolean;
+  /** laufendes Szenario (null = normaler Tag) */
+  szenario: AktivesSzenario | null;
 
   laden: (quelle?: TourDataSource) => Promise<void>;
   planSetzen: (plan: Plan, label: string) => void;
@@ -130,6 +143,10 @@ interface LeitstandZustand {
   vorschauSetzen: (v: Vorschau | null) => void;
   vorschauUebernehmen: () => void;
   fahrerSimulierenSetzen: (an: boolean) => void;
+  /** Szenario starten: Ausfall und Spitzentag beginnen den Tag neu, Stau und Panne gelten ab jetzt */
+  szenarioStarten: (art: SzenarioArt, opt?: { tourId?: string; springer?: boolean }) => Promise<void>;
+  /** zurück zum normalen Tag (06:40) */
+  szenarioBeenden: () => Promise<void>;
   /** Welche Nachrichten bekäme jede Tour, wenn `neu` den aktuellen Tagesplan ersetzt? */
   nachrichtenFuer: (neu: Plan, neuAus: PlanAuswertung | null) => UmplanungsNachricht[];
 }
@@ -140,7 +157,8 @@ let vorschlagTimer: ReturnType<typeof setTimeout> | null = null;
 let sim: SimulierteScanner | null = null;
 let geraet: BroadcastFahrerGeraet | null = null;
 /** Pläne mit Zeitpunkt (für das Zurückspulen) */
-let chronik: Array<{ zeit: number; plan: Plan; label: string }> = [];
+/** Pläne und Lageänderungen mit Zeitpunkt (für das Zurückspulen); tag: gilt ab hier, defekt: Panne dieser Tour */
+let chronik: Array<{ zeit: number; plan: Plan; label: string; tag?: Tag; defekt?: string }> = [];
 const scansJeTour = new Map<string, ScanEreignis[]>();
 let letzteUi = 0;
 let letzteZeitPost = 0;
@@ -227,20 +245,27 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     return neu;
   };
 
-  /** Simulation und Lagebild für den Tag neu aufbauen (Plan aus der Chronik) */
+  /** Simulation und Lagebild für den Tag neu aufbauen (Pläne und Lageänderungen aus der Chronik) */
   const tagAufbauen = (bis: number) => {
-    const { welt, tag, annahmen, behaelterBarcode } = get();
+    const { welt, annahmen, behaelterBarcode } = get();
+    let tag = chronik[0]?.tag ?? get().tag;
     if (!welt || !tag || !chronik.length) return;
-    const ctx = erstelleKontext(welt, tag, annahmen);
+    let ctx = erstelleKontext(welt, tag, annahmen);
     // die „Wirklichkeit“ hängt nicht von den Annahmen im UI ab
-    const ctxWahr = erstelleKontext(welt, tag, standardAnnahmen());
+    let ctxWahr = erstelleKontext(welt, tag, standardAnnahmen());
     sim = new SimulierteScanner(ctxWahr, chronik[0].plan, { behaelterBarcode });
     const lage = new Lagebild(ctx, chronik[0].plan);
     scansJeTour.clear();
-    set({ lage, log: [] });
+    set({ lage, log: [], tag });
     const gueltig = chronik.filter((c, i) => i === 0 || c.zeit <= bis);
     for (const c of gueltig.slice(1)) {
       verarbeitenBis(c.zeit, false);
+      if (c.tag) {
+        tag = c.tag;
+        ctx = erstelleKontext(welt, tag, annahmen);
+        ctxWahr = erstelleKontext(welt, tag, standardAnnahmen());
+      }
+      if (c.defekt && lage.defektMelden(c.defekt, c.zeit)) sim.defektSetzen(c.defekt);
       const commits = lage.planSetzen(ctx, c.plan, c.zeit);
       sim.planAktualisieren(ctxWahr, c.plan, c.zeit, commits);
     }
@@ -248,10 +273,62 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     const neu = verarbeitenBis(bis, false);
     const ende = neu.slice(-150).map((e): LogEintrag => ({ quelle: 'scan', e }));
     const plan = gueltig[gueltig.length - 1].plan;
-    set({ zeit: bis, plan, log: ende, lageVersion: get().lageVersion + 1 });
+    // Stau und Panne, die erst nach `bis` passieren, gibt es (noch) nicht
+    const sz = get().szenario;
+    const szenario = sz && (sz.art === 'stau' || sz.art === 'defekt') && sz.seit > bis ? null : sz;
+    set({ zeit: bis, plan, tag, szenario, log: ende, lageVersion: get().lageVersion + 1 });
     geraet?.post({ typ: 'neustart' });
     planBewerten();
     liveAktualisieren();
+  };
+
+  /** neuer Tag (z. B. Szenario Ausfall/Spitzentag): Plan, Verlauf und Nachrichten von vorn */
+  const tagSetzen = (tag: Tag, startplan: Plan) => {
+    chronik = [{ zeit: -Infinity, plan: startplan, label: 'Startplan', tag }];
+    simBestaetigung = [];
+    set({ tag, startplan, plan: startplan, verlauf: [{ plan: startplan, label: 'Startplan' }], verlaufIndex: 0, nachrichten: [], vorschau: null, laeuft: false });
+    planBewerten();
+    tagAufbauen(TAG_BEGINN);
+    tourDatenSenden();
+  };
+
+  /** Panne einer Tour (aus dem Szenario oder vom Gerät gemeldet) */
+  const panneMelden = (wunsch: string, vomGeraet: boolean) => {
+    const l = get().lage;
+    const tag = get().tag;
+    if (!l || !tag) return;
+    const moeglich = (id: string) => l.fahrzeug(id).phase === 'unterwegs' && !l.fahrzeug(id).defekt && l.fahrzeug(id).behaelter.length > 0;
+    const tour = vomGeraet ? tag.touren.find((t) => t.id === wunsch && moeglich(t.id)) : (tag.touren.find((t) => t.id === wunsch && moeglich(t.id)) ?? tag.touren.find((t) => moeglich(t.id)));
+    if (!tour) {
+      useAnsicht.getState().hinweisSetzen(vomGeraet ? `Panne von ${G.tour} ${tag.touren.find((t) => t.id === wunsch)?.nr} gemeldet, die ${G.tour} ist aber nicht unterwegs.` : `Gerade ist kein ${G.fahrzeug} mit ${G.behaelterPlural} unterwegs.`);
+      return;
+    }
+    lageAendern(`Panne ${G.tour} ${tour.nr}`, { defekt: tour.id });
+    set({ szenario: { art: 'defekt', titel: `Panne bei ${G.tour} ${tour.nr} (${tour.fahrzeugId})`, tourId: tour.id, seit: simUhr.zeit } });
+    logAnhaengen([{ quelle: 'geraet', nr: ++geraeteNr, zeit: simUhr.zeit, art: 'GERAET', tourId: tour.id, text: 'Störung gemeldet: Weiterfahrt nach dem laufenden Bezirk nicht möglich' }]);
+    useAnsicht.getState().hinweisSetzen(`${G.tour} ${tour.nr} meldet eine Panne.`);
+  };
+
+  /** Lageänderung ab jetzt (Stau, Panne): Lagebild und Simulation planen ab dem nächsten sicheren Punkt neu */
+  const lageAendern = (label: string, aenderung: { tag?: Tag; defekt?: string }) => {
+    const { welt, plan, lage, annahmen } = get();
+    if (!welt || !plan || !lage || !sim) return;
+    const t = simUhr.zeit;
+    const tag = aenderung.tag ?? get().tag!;
+    const ctx = erstelleKontext(welt, tag, annahmen);
+    const ctxWahr = erstelleKontext(welt, tag, standardAnnahmen());
+    if (aenderung.tag) set({ tag });
+    if (aenderung.defekt) {
+      if (!lage.defektMelden(aenderung.defekt, t)) return;
+      sim.defektSetzen(aenderung.defekt);
+    }
+    const commits = lage.planSetzen(ctx, plan, t);
+    sim.planAktualisieren(ctxWahr, plan, t, commits);
+    chronik.push({ zeit: t, plan, label, ...aenderung });
+    planBewerten();
+    set({ lageVersion: get().lageVersion + 1 });
+    liveAktualisieren();
+    tourDatenSenden();
   };
 
   const tourDatenSenden = () => {
@@ -284,6 +361,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     geraet.onGeraet = (m) => {
       const { plan, nachrichten, zeit, laeuft, tempo } = get();
       if (m.typ === 'lebenszeichen') set({ geraete: { ...get().geraete, [m.tourId]: Date.now() } });
+      if (m.typ === 'stoerung') panneMelden(m.tourId, true);
       if (m.typ !== 'anmelden' || !plan) return;
       geraet!.post({ typ: 'tour', tourId: m.tourId, plan: plan.touren[m.tourId] ?? { schritte: [] }, uebergabeZeiten: Object.fromEntries(uebergabeZeiten(get().prognose)) });
       geraet!.post({
@@ -326,13 +404,14 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     geraete: {},
     vorschau: null,
     fahrerSimulieren: true,
+    szenario: null,
 
     laden: async (quelle = new DemoTourDataSource()) => {
       const { welt, tag, plan } = await quelle.ladeTag();
       kern ??= new KernClient();
       await kern.setzeWelt(welt);
       geraetEinrichten();
-      chronik = [{ zeit: -Infinity, plan, label: 'Startplan' }];
+      chronik = [{ zeit: -Infinity, plan, label: 'Startplan', tag }];
       set({ welt, tag, startplan: plan, plan, verlauf: [{ plan, label: 'Startplan' }], verlaufIndex: 0 });
       planBewerten();
       tagAufbauen(TAG_BEGINN);
@@ -500,8 +579,11 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       get().vorschauSetzen(null);
       const { startplan } = get();
       if (!startplan) return;
-      chronik = [{ zeit: -Infinity, plan: startplan, label: 'Startplan' }];
+      const basis = chronik[0]?.tag;
+      chronik = [{ zeit: -Infinity, plan: startplan, label: 'Startplan', tag: basis }];
       simBestaetigung = [];
+      const sz = get().szenario;
+      if (sz && (sz.art === 'stau' || sz.art === 'defekt')) set({ szenario: null });
       set({ laeuft: false, nachrichten: [], verlauf: [{ plan: startplan, label: 'Startplan' }], verlaufIndex: 0 });
       tagAufbauen(TAG_BEGINN);
     },
@@ -517,6 +599,43 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     fahrerSimulierenSetzen: (an) => set({ fahrerSimulieren: an }),
+
+    szenarioStarten: async (art, opt = {}) => {
+      const { annahmen, welt } = get();
+      if (!welt) return;
+      get().vorschauSetzen(null);
+      const info = SZENARIEN[art];
+      if (art === 'ausfall' || art === 'spitzentag') {
+        const faktor = art === 'spitzentag' ? 1 + annahmen.spitzentagProzent / 100 : 1;
+        const { tag, plan } = await new DemoTourDataSource().ladeTag({ mengenFaktor: faktor });
+        const tourId = opt.tourId ?? 'T3';
+        const neuerTag = art === 'ausfall' ? mitAusfall(tag, tourId, opt.springer ? annahmen.springerVorlaufMin : null) : tag;
+        const titel =
+          art === 'ausfall'
+            ? `${G.tour} ${tag.touren.find((t) => t.id === tourId)?.nr} fällt aus${opt.springer ? ` – ${G.springer} ab ${fmtUhr(neuerTag.start[tourId].schichtbeginn)}` : ''}`
+            : `${info.titel} +${annahmen.spitzentagProzent} %`;
+        set({ szenario: { art, titel, tourId: art === 'ausfall' ? tourId : undefined, springer: opt.springer, seit: TAG_BEGINN } });
+        tagSetzen(neuerTag, plan);
+        return;
+      }
+      if (art === 'stau') {
+        if (simUhr.zeit < 9 * 60) get().zeitSetzen(9 * 60 + 30);
+        const tag = mitSperrung(get().tag!, welt, STAU_STRASSE);
+        lageAendern(`Sperrung ${STAU_STRASSE}`, { tag });
+        set({ szenario: { art, titel: info.titel, seit: simUhr.zeit } });
+        logAnhaengen([{ quelle: 'geraet', nr: ++geraeteNr, zeit: simUhr.zeit, art: 'GERAET', tourId: '–', text: `Verkehrsmeldung: ${STAU_STRASSE} gesperrt (Unfall)` }]);
+        return;
+      }
+      // Panne: mittags, bei einem Fahrzeug unterwegs
+      if (simUhr.zeit < 11 * 60) get().zeitSetzen(11 * 60 + 30);
+      panneMelden(opt.tourId ?? 'T2', false);
+    },
+
+    szenarioBeenden: async () => {
+      const { tag, plan } = await new DemoTourDataSource().ladeTag();
+      set({ szenario: null });
+      tagSetzen(tag, plan);
+    },
 
     nachrichtenFuer: (neu, neuAus) => {
       const { ctxLive, plan, prognose, lage } = get();
@@ -577,7 +696,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
       const beginn = Math.min(...ctx.tag.touren.map((x) => ctx.tag.start[x.id].schichtbeginn));
       if (t < beginn) {
         // vor Schichtbeginn: gilt als Plan des Tages
-        chronik = [{ zeit: -Infinity, plan, label }];
+        chronik = [{ zeit: -Infinity, plan, label, tag: chronik[0]?.tag }];
         tagAufbauen(t);
       } else {
         const ctxWahr = erstelleKontext(ctx.welt, ctx.tag, standardAnnahmen());

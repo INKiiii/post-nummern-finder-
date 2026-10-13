@@ -10,7 +10,7 @@ import { fmtDauer, fmtKm, fmtUhr } from './format';
 import { behaelterFolge, bewertePlan, vergleiche, type Delta, type Kontext, type PlanAuswertung } from './modell';
 import { Loesung, Problem, einfuegen, loesungZuPlan, optimiere } from './optimierer';
 import type { Plan } from './types';
-import { anBordVon, neueUebergaben, tauschUebergaben, tourMitBehaelter, uebergabeZiele, type UebergabeErgebnis, type UebergabeInfo } from './uebergabe';
+import { anBordVon, defektAuffangen, ortName, neueUebergaben, tauschUebergaben, tourMitBehaelter, uebergabeZiele, type UebergabeErgebnis, type UebergabeInfo } from './uebergabe';
 
 export type VorschlagArt = 'tourEinsparen' | 'ueberlastung' | 'umlegen' | 'reihenfolge' | 'ausfall' | 'gesamt';
 
@@ -150,9 +150,11 @@ export function erzeugeVorschlaege(ctx: Kontext, plan: Plan, opt: VorschlagOptio
   const liste: Vorschlag[] = [];
   const p = new Problem(ctx, plan);
 
-  // Ausfall auffangen: unbesetzte Touren mit Behältern
-  const ausfall = ctx.tag.touren.filter((t) => !ctx.tag.start[t.id].besetzt && behaelterFolge(plan, t.id).length > 0);
-  if (ausfall.length > 0) {
+  // Ausfall auffangen: unbesetzte Touren, deren Behälter noch eingeplant sind oder liegen bleiben würden
+  const unbesetzt = ctx.tag.touren.filter((t) => !ctx.tag.start[t.id].besetzt);
+  const ausfall = unbesetzt.filter((t) => behaelterFolge(plan, t.id).length > 0);
+  if (ausfall.length > 0 || (unbesetzt.length > 0 && plan.liegenLassen.some((b) => p.beweglich.has(b)))) {
+    const namen = (ausfall.length ? ausfall : unbesetzt).map((t) => tourName(ctx, t.id));
     const neu = optimiere(ctx, plan, { liegenLassenErlaubt: true, tourenAufloesen: false });
     const v = baue(
       ctx,
@@ -160,11 +162,40 @@ export function erzeugeVorschlaege(ctx: Kontext, plan: Plan, opt: VorschlagOptio
       plan,
       alt,
       neu,
-      `Ausfall ${aufzaehlung(ausfall.map((t) => tourName(ctx, t.id)))} auffangen`,
+      `Ausfall ${aufzaehlung(namen)} auffangen`,
       (n, _d, diff) => {
         const verteilt = diff.aenderungen.filter((x) => x.nach !== null).length;
         const liegen = n.liegen.behaelter.length;
         return `${verteilt} ${G.behaelterPlural} auf andere ${G.touren} verteilt${liegen ? `, ${liegen} bleiben liegen` : ', alles wird zugestellt'}. ${aenderungsText(ctx, diff.aenderungen)}.`;
+      },
+      false,
+    );
+    if (v) liste.push(v);
+  }
+
+  // Panne auffangen: die anderen holen die Behälter am Standort ab
+  for (const t of ctx.tag.touren) {
+    const st = ctx.tag.start[t.id];
+    if (!st.defekt) continue;
+    const offen = st.geladen.filter((b) => !st.erledigt.includes(b) && (plan.liegenLassen.includes(b) || behaelterFolge(plan, t.id).includes(b)));
+    if (!offen.length) continue;
+    const fz = t.fahrzeugId;
+    const neuPlan = defektAuffangen(ctx, plan, t.id);
+    const v = baue(
+      ctx,
+      'ausfall',
+      plan,
+      alt,
+      neuPlan,
+      `Panne ${tourName(ctx, t.id)} auffangen`,
+      (n) => {
+        const ueb = neueUebergaben(ctx, plan, neuPlan, n);
+        const liste = ueb.map((u) => `${u.abgeben.join(', ')} → ${tourName(ctx, u.nach === t.id ? u.von : u.nach)} (${fmtUhr(u.zeit)})`);
+        const bleiben = offen.filter((b) => n.liegen.behaelter.includes(b)).length;
+        return (
+          `${ueb.length} von ${offen.length} ${offen.length === 1 ? G.behaelter : G.behaelterPlural} ${ueb.length === 1 ? 'wird' : 'werden'} am Standort von ${fz} übergeben: ${liste.join(', ')}.` +
+          (bleiben ? ` ${bleiben} ${bleiben === 1 ? 'bleibt' : 'bleiben'} heute liegen.` : ' Alles wird noch zugestellt.')
+        );
       },
       false,
     );
@@ -275,7 +306,7 @@ export function erzeugeVorschlaege(ctx: Kontext, plan: Plan, opt: VorschlagOptio
         `Überlastung ${tourName(ctx, o)} abbauen`,
         (n) =>
           `${G.behaelter} ${u.info.abgeben.join(', ')}: ${tourName(ctx, u.info.von)} → ${tourName(ctx, u.info.nach)}, ` +
-          `Übergabe ${fmtUhr(u.info.zeit)} am ${G.treffpunkt} ${u.info.treffpunkt.name}. ` +
+          `Übergabe ${fmtUhr(u.info.zeit)} am ${ortName(u.info.treffpunkt.name)}. ` +
           `${tourName(ctx, o)} endet ${fmtUhr(n.touren[o].ende)} statt ${fmtUhr(alt.touren[o].ende)}.`,
         false,
       );

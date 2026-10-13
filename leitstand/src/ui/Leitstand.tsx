@@ -15,6 +15,7 @@ import { BehaelterPanel } from './panels/BehaelterPanel';
 import { BezirkPanel } from './panels/BezirkPanel';
 import { FahrzeugPanel } from './panels/FahrzeugPanel';
 import { Balken } from './panels/Gemeinsam';
+import { SzenarienPanel } from './panels/SzenarienPanel';
 import { VorschlaegePanel } from './panels/VorschlaegePanel';
 import { Hinweise } from './umplanen/Hinweise';
 import { VorschauKarte } from './umplanen/VorschauKarte';
@@ -23,6 +24,9 @@ import { useZeitTasten } from './takt';
 import { Zeitleiste } from './Zeitleiste';
 
 const SCHMAL = '(max-width: 819px)';
+
+/** Szenario im Kopf auf dem Handy: nur ein Stichwort */
+const KURZ = { ausfall: 'Ausfall', stau: 'Stau', defekt: 'Panne', spitzentag: 'Spitzentag' } as const;
 
 function useSchmal(): boolean {
   return useSyncExternalStore(
@@ -51,8 +55,9 @@ export function Leitstand() {
   const [info, setInfo] = useState(false);
   const [menue, setMenue] = useState(false);
   const [blattOffen, setBlattOffen] = useState(true);
-  const [blattTab, setBlattTab] = useState<'touren' | 'vorschlaege' | 'ereignisse'>('touren');
-  const [vorschlaegeOffen, setVorschlaegeOffen] = useState(false);
+  const [blattTab, setBlattTab] = useState<'touren' | 'vorschlaege' | 'ereignisse' | 'szenarien'>('touren');
+  const [rechtsAnsicht, setRechtsAnsicht] = useState<'vorschlaege' | 'szenarien' | null>(null);
+  const vorschlaegeOffen = rechtsAnsicht === 'vorschlaege';
   useZeitTasten();
   const [ereignisse, setEreignisseRoh] = useState(ereignisseAnfangs);
   const setEreignisse = (an: boolean) => {
@@ -127,11 +132,39 @@ export function Leitstand() {
   const anzahlVorschlaege = s.vorschlaege.filter((v) => v.delta.euroTag > 0.5 || v.art === 'ausfall' || v.delta.ueberstundenMin < -0.5).length;
   const vorschlaegeZeigen = () => {
     ansicht.waehlen(null);
-    setVorschlaegeOffen(true);
+    setRechtsAnsicht('vorschlaege');
     setBlattTab('vorschlaege');
     setBlattOffen(true);
   };
-  const rechts = panel ?? (vorschlaegeOffen ? <VorschlaegePanel onSchliessen={() => setVorschlaegeOffen(false)} /> : null);
+  const szenarienZeigen = () => {
+    ansicht.waehlen(null);
+    setRechtsAnsicht('szenarien');
+    setBlattTab('szenarien');
+    setBlattOffen(true);
+  };
+  const szenarien = <SzenarienPanel onSchliessen={() => (schmal ? setBlattTab('touren') : setRechtsAnsicht(null))} onGestartet={vorschlaegeZeigen} />;
+  const rechts =
+    panel ??
+    (rechtsAnsicht === 'vorschlaege' ? (
+      <VorschlaegePanel onSchliessen={() => setRechtsAnsicht(null)} />
+    ) : rechtsAnsicht === 'szenarien' ? (
+      szenarien
+    ) : null);
+
+  // Lage: Behälter, die ohne Umplanung heute liegen blieben (Ausfall, Panne)
+  const liegen = prognose?.liegen.behaelter ?? [];
+  const lageWarnung =
+    liegen.length > 0 ? (
+      <div className="lage-warnung">
+        <b>
+          {liegen.length} {liegen.length === 1 ? G.behaelter : G.behaelterPlural} {liegen.length === 1 ? 'bleibt' : 'bleiben'} heute liegen
+        </b>
+        <span>{liegen.join(', ')}</span>
+        <button className="knopf klein primaer" onClick={vorschlaegeZeigen}>
+          Vorschläge ansehen
+        </button>
+      </div>
+    ) : null;
 
   const kennzahlen = (
     <div className="kennzahlen-leiste">
@@ -163,6 +196,7 @@ export function Leitstand() {
       {ctx.tag.touren.map((t) => {
         const p = lage.prognose(t.id, zeit);
         const pa = prognose?.touren[t.id];
+        const besetzt = ctx.tag.start[t.id].besetzt;
         const schicht = s.annahmen.schichtStunden * 60;
         const auslastung = pa?.aktiv ? pa.dauer / schicht : 0;
         const aktiv = a?.art === 'fahrzeug' && a.id === t.id;
@@ -186,7 +220,7 @@ export function Leitstand() {
                   </span>
                 )}
               </b>
-              <span className="leise">{pa?.aktiv ? p.statusText : 'entfällt'}</span>
+              <span className={`leise ${!besetzt || lage.fahrzeug(t.id).defekt ? 'schlecht' : ''}`}>{pa?.aktiv || !besetzt ? p.statusText : 'entfällt'}</span>
             </span>
             <span className="rechts">
               {pa?.aktiv ? (
@@ -214,7 +248,17 @@ export function Leitstand() {
           <b>
             Zustell-{G.leitstand} <span className="leise">· {ctx.welt.name}</span>
           </b>
-          <span className="leise klein">{ctx.tag.datum} · alle Daten erfunden · Lage nur aus Scan-Ereignissen</span>
+          {s.szenario ? (
+            <span className="szenario-chip">
+              <span className="lang">Szenario: {s.szenario.titel}</span>
+              <span className="kurz">{KURZ[s.szenario.art]}</span>
+              <button onClick={() => void s.szenarioBeenden()} aria-label="Szenario beenden" title="Szenario beenden (normaler Tag)">
+                ✕
+              </button>
+            </span>
+          ) : (
+            <span className="leise klein">{ctx.tag.datum} · alle Daten erfunden · Lage nur aus Scan-Ereignissen</span>
+          )}
         </div>
         <div className="uhr-anzeige" title="Simulationsuhr">
           {fmtUhr(zeit)}
@@ -232,8 +276,15 @@ export function Leitstand() {
             Basis zeigen
           </button>
           <button
+            className={`knopf nur-breit ${rechtsAnsicht === 'szenarien' && !panel ? 'an' : ''}`}
+            onClick={() => (rechtsAnsicht === 'szenarien' && !panel ? setRechtsAnsicht(null) : szenarienZeigen())}
+            aria-pressed={rechtsAnsicht === 'szenarien' && !panel}
+          >
+            Szenarien
+          </button>
+          <button
             className={`knopf nur-breit ${vorschlaegeOffen && !panel ? 'an' : ''}`}
-            onClick={() => (vorschlaegeOffen && !panel ? setVorschlaegeOffen(false) : vorschlaegeZeigen())}
+            onClick={() => (vorschlaegeOffen && !panel ? setRechtsAnsicht(null) : vorschlaegeZeigen())}
             aria-pressed={vorschlaegeOffen && !panel}
           >
             Vorschläge{anzahlVorschlaege > 0 && <span className="zaehler">{anzahlVorschlaege}</span>}
@@ -264,6 +315,7 @@ export function Leitstand() {
                 <button onClick={() => ansicht.qualitaetSetzen(ansicht.qualitaet === 'hoch' ? 'niedrig' : 'hoch')}>
                   Grafik: {ansicht.qualitaet === 'hoch' ? 'hoch' : 'sparsam'} (umschalten)
                 </button>
+                <button onClick={szenarienZeigen}>Szenarien (Ausfall, Stau, Panne, Spitzentag)</button>
                 <button onClick={ganzeKarte}>Ganze Karte</button>
                 <button onClick={s.zumStartplan} disabled={plan === s.startplan}>
                   Startplan
@@ -307,10 +359,13 @@ export function Leitstand() {
                 (blattTab === 'touren' ? (
                   <>
                     {kennzahlen}
+                    {lageWarnung}
                     {tourenListe}
                   </>
                 ) : blattTab === 'vorschlaege' ? (
                   <VorschlaegePanel onSchliessen={() => setBlattTab('touren')} />
+                ) : blattTab === 'szenarien' ? (
+                  szenarien
                 ) : (
                   <EreignisPanel />
                 )))
@@ -323,6 +378,7 @@ export function Leitstand() {
         <>
           <aside className="ls-links glas">
             {kennzahlen}
+            {lageWarnung}
             <h3 className="abschnitt-titel">{G.touren}</h3>
             {tourenListe}
           </aside>

@@ -32,7 +32,7 @@ export function LabelEbene() {
   const fahrzeuge = useMemo(() => {
     void lageVersion;
     if (!ctx || !lage) return [];
-    return ctx.tag.touren.map((t) => ({ t, p: lage.prognose(t.id, zeit), besetzt: ctx.tag.start[t.id].besetzt }));
+    return ctx.tag.touren.map((t) => ({ t, p: lage.prognose(t.id, zeit), besetzt: ctx.tag.start[t.id].besetzt, panne: !!lage.fahrzeug(t.id).defekt }));
   }, [ctx, lage, zeit, lageVersion]);
 
   if (!ctx) return null;
@@ -55,16 +55,16 @@ export function LabelEbene() {
       <div ref={labelRef('basis')} data-aus={abstand > 70 ? '0' : '1'} className="label">
         <div className="szene-label basis">{G.zustellbasis}</div>
       </div>
-      {fahrzeuge.map(({ t, p, besetzt }) => {
+      {fahrzeuge.map(({ t, p, besetzt, panne }) => {
         const anBasis = p.phase !== 'unterwegs';
         const gewaehlt = gleicheAuswahl(auswahl, { art: 'fahrzeug', id: t.id });
         const zeigen = !anBasis || abstand < 140 || gewaehlt || !!vorschau?.delta.betroffen.includes(t.id);
         const grau = !besetzt;
         return (
           <div key={t.id} ref={labelRef(`fz:${t.id}`)} data-aus={zeigen ? '0' : '1'} className="label">
-            <div className={`fahrzeug-label ${gewaehlt ? 'aktiv' : ''}`} style={{ ['--tourfarbe' as string]: grau ? '#8a919b' : t.farbe }}>
+            <div className={`fahrzeug-label ${gewaehlt ? 'aktiv' : ''} ${panne ? 'panne' : ''}`} style={{ ['--tourfarbe' as string]: grau ? '#8a919b' : t.farbe }}>
               <span className="nr">{t.nr}</span>
-              {labelText(p, zeit, besetzt)}
+              {panne ? 'Panne' : labelText(p, zeit, besetzt)}
               {vorschau && <VorschauDelta tourId={t.id} />}
               {nachrichten.some((n) => n.tourId === t.id && n.punkte && n.bestaetigt === null && !n.ersetztDurch) && (
                 <span className="label-brief" title="Umplanung noch nicht bestätigt">
@@ -75,6 +75,11 @@ export function LabelEbene() {
           </div>
         );
       })}
+      {ctx.tag.sperrungen.length > 0 && (
+        <div ref={labelRef('sperrung')} data-aus="0" className="label">
+          <div className="szene-label sperrung">Gesperrt: Unfall, Stau</div>
+        </div>
+      )}
       {vorschau?.uebergaben.map((u) => (
         <div key={u.id} ref={labelRef(`vorschau:${u.id}`)} data-aus="0" className="label">
           <div className="szene-label treff vorschau">

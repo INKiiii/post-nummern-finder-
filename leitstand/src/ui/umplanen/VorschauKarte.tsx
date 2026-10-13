@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { G } from '../../glossar';
 import { fmtDauer, fmtUhr } from '../../core/format';
+import { ortName } from '../../core/uebergabe';
 import { VORSCHLAG_NAME, tourName } from '../../core/vorschlaege';
 import { useLeitstand } from '../../state/store';
 import { DeltaRaster } from './DeltaRaster';
@@ -34,7 +35,7 @@ export function VorschauKarte() {
           <span className="treff-symbol" aria-hidden="true" />
           <span>
             <b>
-              Übergabe {fmtUhr(u.zeit)} am {G.treffpunkt} {u.treffpunkt.name}
+              Übergabe {fmtUhr(u.zeit)} am {ortName(u.treffpunkt.name)}
             </b>
             <br />
             <span className="leise">

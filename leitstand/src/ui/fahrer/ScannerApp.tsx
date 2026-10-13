@@ -13,6 +13,7 @@ import type { ScanEreignis } from '../../core/scan';
 import { fmtUhrSek } from '../../core/scan';
 import { paketeFuer, stoppAdresse, stoppMengen } from '../../core/sendungen';
 import type { Tag, TourPlan, Welt } from '../../core/types';
+import { ortName } from '../../core/uebergabe';
 import { GeraeteKanal, type VonZentrale } from '../../geraet/kanal';
 
 interface Daten {
@@ -69,6 +70,7 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
   const [verbunden, setVerbunden] = useState(false);
   const [seite, setSeite] = useState<Seite>('start');
   const [kanal, setKanal] = useState<GeraeteKanal | null>(null);
+  const [panne, setPanne] = useState<'frage' | 'gemeldet' | null>(null);
 
   useEffect(() => {
     const k = new GeraeteKanal(tourId, (m: VonZentrale) => {
@@ -210,7 +212,7 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
             {naechsteZeile?.art === 'uebergabe' && !tourEnde ? (
               <div className="geraet-karte gross uebergabe">
                 <div className="geraet-klein">Nächster Halt: Übergabe{naechsteZeile.zeit !== null ? ` um ${fmtUhr(naechsteZeile.zeit)}` : ''}</div>
-                <div className="geraet-adresse">{G.treffpunkt} {naechsteZeile.treffpunkt}</div>
+                <div className="geraet-adresse">{ortName(naechsteZeile.treffpunkt)}</div>
                 <UebergabeText z={naechsteZeile} />
               </div>
             ) : (
@@ -271,6 +273,36 @@ function TourAnsicht({ daten, tourId }: { daten: Daten; tourId: string }) {
                 <small>Tour wechseln</small>
               </a>
             </div>
+            {tourGestartet && !tourEnde && (
+              <div className="geraet-panne">
+                {panne === null && (
+                  <button className="geraet-knopf warnung" onClick={() => setPanne('frage')}>
+                    Panne melden
+                    <small>Fahrzeug kann nicht weiterfahren</small>
+                  </button>
+                )}
+                {panne === 'frage' && (
+                  <div className="geraet-karte">
+                    <div className="geraet-klein">Panne wirklich melden? Der {G.leitstand} plant die {G.behaelterPlural} um.</div>
+                    <div className="geraet-raster">
+                      <button
+                        className="geraet-knopf warnung"
+                        onClick={() => {
+                          kanal?.stoerungMelden();
+                          setPanne('gemeldet');
+                        }}
+                      >
+                        Ja, melden
+                      </button>
+                      <button className="geraet-knopf leise" onClick={() => setPanne(null)}>
+                        Abbrechen
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {panne === 'gemeldet' && <div className="geraet-hinweis">Panne gemeldet. Bitte nach dem laufenden {G.bezirk} anhalten und auf Nachricht warten.</div>}
+              </div>
+            )}
           </>
         )}
 

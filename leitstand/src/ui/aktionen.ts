@@ -2,7 +2,7 @@
 import { G } from '../glossar';
 import { fmtUhr } from '../core/format';
 import type { Kontext } from '../core/modell';
-import { tourMitBehaelter } from '../core/uebergabe';
+import { ortName, tourMitBehaelter } from '../core/uebergabe';
 import { tauschOptionen, tourName, umplanOptionen, type TauschOption, type UmplanOption } from '../core/vorschlaege';
 import { basisPosition, behaelterPosition, bezirkMitte, fahrzeugPosition } from '../szene/auswahl';
 import { uebersichtsAbstand, uebersichtsPolar } from '../szene/Kamera';
@@ -97,7 +97,7 @@ export function optionVorschau(o: UmplanOption, behaelterId: string): Vorschau |
   const u = o.uebergabe;
   const titel = `${G.behaelter} ${behaelterId}: ${tourName(ctx, von)} → ${tourName(ctx, o.tourId)}`;
   const text = u
-    ? `Übergabe ${fmtUhr(u.zeit)} am ${G.treffpunkt} ${u.treffpunkt.name}. ${tourName(ctx, o.tourId)} endet ${fmtUhr(o.endeDanach)}.`
+    ? `Übergabe ${fmtUhr(u.zeit)} am ${ortName(u.treffpunkt.name)}. ${tourName(ctx, o.tourId)} endet ${fmtUhr(o.endeDanach)}.`
     : `${tourName(ctx, o.tourId)} lädt den ${G.behaelter} an ${G.rampe} ${ctx.tag.touren.find((t) => t.id === o.tourId)?.rampe} und endet ${fmtUhr(o.endeDanach)}.`;
   return s.vorschauBauen(o.plan, titel, 'andereTour', text);
 }
@@ -111,7 +111,7 @@ export function tauschVorschau(o: TauschOption, behaelterId: string): Vorschau |
   const u = o.uebergabe;
   const titel = `${behaelterId} ⇄ ${o.partner} tauschen (${tourName(ctx, von)} ⇄ ${tourName(ctx, o.tourId)})`;
   const text = u
-    ? `Übergabe ${fmtUhr(u.zeit)} am ${G.treffpunkt} ${u.treffpunkt.name}: beide ${G.behaelterPlural} wechseln das ${G.fahrzeug}.`
+    ? `Übergabe ${fmtUhr(u.zeit)} am ${ortName(u.treffpunkt.name)}: beide ${G.behaelterPlural} wechseln das ${G.fahrzeug}.`
     : `Beide ${G.behaelterPlural} werden an der anderen ${G.rampe} verladen.`;
   return s.vorschauBauen(o.plan, titel, 'tauschen', text);
 }

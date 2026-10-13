@@ -10,6 +10,7 @@
  *  - Prognosen: Soll-Zeiten des Rechenmodells, angepasst an das beobachtete Tempo
  */
 import { G } from '../glossar';
+import { fmtUhr } from './format';
 import { addInhalt, fahrMinuten, ladungAus, leeresBisher, zustellMinuten, type Kontext } from './modell';
 import {
   baueRoute,
@@ -63,6 +64,8 @@ export interface FahrzeugLage {
   /** Soll-Zeitplan ohne Wartezeiten an Treffpunkten ab sollAbS */
   sollBasis: Zeitplan;
   sollAbS: number;
+  /** Panne gemeldet: das Fahrzeug steht ab Strecke s (nach dem laufenden Bezirk) */
+  defekt: { seit: number; s: number } | null;
 }
 
 export interface BehaelterLage {
@@ -176,6 +179,7 @@ export class Lagebild {
         soll: { s: [0], t: [0] },
         sollBasis: { s: [0], t: [0] },
         sollAbS: 0,
+        defekt: null,
       });
     }
     for (const b of ctx.tag.behaelterIds) {
@@ -235,7 +239,8 @@ export class Lagebild {
     const anBord = new Set(f.behaelter);
     const rest = this.offeneSchritte(f, schritte, erledigt, anBord, commit.s);
     const knoten = f.route.knoten[Math.max(0, f.route.s.findIndex((x) => x >= commit.s - 1e-9))];
-    const neu = baueRoute(this.ctx, knoten, routenSchritte(rest), true);
+    // mit Panne: nur noch Übergaben am Standort, keine Rückfahrt
+    const neu = baueRoute(this.ctx, knoten, routenSchritte(rest), !f.defekt);
     const tSoll = zeitBeiS(f.soll, commit.s).abfahrt;
     const neuZp = this.sollZeitplan(neu, tSoll);
     f.sollBasis = verketteZeitplan(f.soll, commit.s, tSoll, neuZp);
@@ -258,9 +263,21 @@ export class Lagebild {
         if (teil && teil.s0 < abS - 1e-9) continue;
         rest.push(x);
         for (const b of x.aufnehmen) kommt.add(b);
-      } else if (!erledigt.has(x.behaelterId) && (anBord.has(x.behaelterId) || kommt.has(x.behaelterId))) rest.push(x);
+      } else if (!f.defekt && !erledigt.has(x.behaelterId) && (anBord.has(x.behaelterId) || kommt.has(x.behaelterId))) rest.push(x);
     }
     return rest;
+  }
+
+  /**
+   * Panne gemeldet (über das Gerät): Das Fahrzeug fährt den laufenden Bezirk noch zu Ende
+   * bzw. bis zur nächsten Kreuzung und bleibt dann stehen. Liefert den Punkt, an dem es steht.
+   */
+  defektMelden(tourId: string, zeit: number): { s: number; t: number } | null {
+    const f = this.fz.get(tourId);
+    if (!f || f.phase !== 'unterwegs' || f.defekt) return null;
+    const c = this.commitPunkt(tourId, zeit);
+    f.defekt = { seit: zeit, s: c.s };
+    return c;
   }
 
   /** Soll-Zeiten: wer zuerst am Treffpunkt ist, wartet auf den Partner */
@@ -284,7 +301,7 @@ export class Lagebild {
       const f = this.fz.get(t.id)!;
       if (f.phase === 'rampe' || f.phase === 'laedt') this.sollRouteNeu(t.id, null);
       else if (f.phase === 'unterwegs') {
-        const c = this.commitPunkt(t.id, zeit);
+        const c = f.defekt ? { s: f.defekt.s, t: zeitBeiS(f.soll, f.defekt.s).ankunft } : this.commitPunkt(t.id, zeit);
         commits.set(t.id, c.s);
         this.sollRouteNeu(t.id, c);
       }
@@ -524,6 +541,8 @@ export class Lagebild {
     const anzeige = zeit - ANZEIGE_VERZOEGERUNG_MIN;
     const rampe: Pose = { x: NaN, y: NaN, richtung: 0, anRampe: true, uebergang: null };
     if (f.phase === 'rampe' || f.phase === 'laedt' || f.tourStart === null) return rampe;
+    // Panne: nach dem Abmelden bleibt das Fahrzeug, wo es steht (wird abgeschleppt)
+    if (f.defekt && f.phase === 'zurueck') return { ...punktBei(f.route, f.route.laenge), anRampe: false, uebergang: null };
     // Rückkehr: noch eine Minute vom Hof an die Rampe
     if (f.phase === 'zurueck' && f.tourEnde !== null && anzeige >= f.tourEnde) {
       const anteil = (anzeige - f.tourEnde) / ANZEIGE_VERZOEGERUNG_MIN;
@@ -598,6 +617,12 @@ export class Lagebild {
     const s = this.ctx.tag.start[tourId];
     const leer: Prognose = { phase: f.phase, statusText: '', abfahrt: f.tourStart ?? f.soll.t[0], naechster: null, rueckkehr: zeit, fortschritt: 0, tempo: 1 };
     if (!s.besetzt) return { ...leer, statusText: 'Unbesetzt' };
+    if (f.defekt) {
+      const steht = (f.ref?.s ?? 0) >= f.defekt.s - 0.02;
+      const offen = f.route.teile.some((x) => x.art === 'treffpunkt' && x.uebergabeId && !this.uebergabenErledigt.has(x.uebergabeId));
+      const text = f.phase === 'zurueck' ? `Panne – abgemeldet` : !steht ? `Panne gemeldet – fährt den ${G.bezirk} noch zu Ende` : offen ? `Panne – ${G.behaelterPlural} werden übergeben` : `Panne – steht seit ${fmtUhr(f.defekt.seit)}`;
+      return { ...leer, phase: f.phase, statusText: text, abfahrt: f.tourStart ?? leer.abfahrt, rueckkehr: f.tourEnde ?? this.ankunftBei(tourId, f.route.laenge) };
+    }
     if (f.route.teile.length <= 1 && f.phase === 'rampe') return { ...leer, statusText: `Ohne ${G.behaelterPlural}` };
     const ende = this.ankunftBei(tourId, f.route.laenge);
     const t0 = f.soll.t[0];
@@ -663,7 +688,11 @@ export class Lagebild {
         erg[t.id] = morgen;
         continue;
       }
-      const c = f.phase === 'zurueck' ? { s: f.route.laenge, t: f.tourEnde! } : this.commitPunkt(t.id, zeit);
+      const c = f.defekt
+        ? { s: f.defekt.s, t: Math.max(zeit, this.ankunftBei(t.id, f.defekt.s)) }
+        : f.phase === 'zurueck'
+          ? { s: f.route.laenge, t: f.tourEnde! }
+          : this.commitPunkt(t.id, zeit);
       const bisher = leeresBisher();
       for (const teil of f.route.teile) {
         const l = Math.max(0, Math.min(teil.s1, c.s) - teil.s0);
@@ -678,7 +707,7 @@ export class Lagebild {
       bisher.min.fahrtZwischen = fahrMinuten(bisher.kmZwischen, a.tempoZwischenKmh);
       bisher.min.fahrtInnen = fahrMinuten(bisher.kmInnen, a.tempoImGebietKmh);
       bisher.min.zustellung = Math.max(0, c.t - f.tourStart! - bisher.min.fahrtZwischen - bisher.min.fahrtInnen);
-      const zurueck = f.phase === 'zurueck';
+      const zurueck = f.phase === 'zurueck' && !f.defekt;
       const knotenIdx = Math.max(0, f.route.s.findIndex((x) => x >= c.s - 1e-9));
       erg[t.id] = {
         ...morgen,
@@ -687,6 +716,7 @@ export class Lagebild {
         mussLaden: false,
         geladen: zurueck ? [] : f.behaelter.filter((b) => !erledigt.includes(b)),
         erledigt: zurueck ? [...new Set([...erledigt, ...f.behaelter])] : erledigt,
+        defekt: !!f.defekt,
         bisher,
       };
     }
@@ -710,6 +740,11 @@ export class Lagebild {
           continue;
         }
         if (fertig.has(x.behaelterId)) continue;
+        // ohne Fahrer bzw. mit Panne kann die Tour nichts mehr zustellen: bleibt liegen, bis umgeplant wird
+        if (!s.besetzt || s.defekt) {
+          liegen.add(x.behaelterId);
+          continue;
+        }
         if (s.mussLaden || s.geladen.includes(x.behaelterId) || kommt.has(x.behaelterId)) schritte.push(x);
         else liegen.add(x.behaelterId); // unterwegs, aber nicht an Bord: bleibt heute liegen
       }

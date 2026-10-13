@@ -2179,3 +2179,158 @@ table.quellen td.nichts {
   background: #f0a52a;
   color: #1f2733;
 }
+
+/* ---- Szenarien ------------------------------------------------------------------- */
+
+.szenario-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  width: fit-content;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 4px 2px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--schlecht) 12%, transparent);
+  color: var(--schlecht);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.szenario-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.szenario-chip .kurz {
+  display: none;
+}
+
+@media (max-width: 819px) {
+  .szenario-chip .lang {
+    display: none;
+  }
+  .szenario-chip .kurz {
+    display: inline;
+  }
+}
+
+.szenario-chip button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.lage-warnung {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--schlecht) 40%, transparent);
+  background: color-mix(in srgb, var(--schlecht) 8%, transparent);
+  font-size: 13px;
+}
+
+.lage-warnung b {
+  color: var(--schlecht);
+}
+
+.lage-warnung span {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--textLeise);
+}
+
+.lage-warnung .knopf {
+  justify-self: start;
+}
+
+.szenarien {
+  display: grid;
+  gap: 10px;
+}
+
+.szenario-karte {
+  border: 1px solid var(--rand);
+  border-radius: var(--radius-klein);
+  padding: 11px 12px;
+}
+
+.szenario-karte .art {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--textLeise);
+  font-weight: 650;
+}
+
+.szenario-karte h3 {
+  margin: 2px 0 4px;
+  font-size: 15px;
+}
+
+.szenario-karte p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.szenario-bedienung {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.szenario-wahl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.szenario-wahl select {
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--rand);
+  background: var(--flaeche);
+  color: var(--text);
+}
+
+.szenario-aktiv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--schlecht) 8%, transparent);
+}
+
+.szenario-aktiv div {
+  display: grid;
+}
+
+.fahrzeug-label.panne {
+  border-color: var(--schlecht);
+  background: #fff1f0;
+}
+
+.szene-label.sperrung {
+  background: var(--schlecht);
+  color: #fff;
+  font-size: 12px;
+}
+
+.geraet-panne {
+  margin-top: 10px;
+}
+
+.geraet-knopf.warnung {
+  --tourfarbe: #d9534f;
+  color: #b42318;
+}

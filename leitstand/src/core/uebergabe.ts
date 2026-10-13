@@ -6,6 +6,7 @@
  * Gesucht wird über alle Treffpunkte und alle Stellen in beiden Touren: erst grob geschätzt
  * (Umweg und Wartezeit in Euro), dann die besten Kandidaten genau mit dem Rechenmodell.
  */
+import { G } from '../glossar';
 import { bewertePlan, fahrMinuten, vergleiche, type Delta, type Kontext, type PlanAuswertung } from './modell';
 import type { KnotenId, Plan, Schritt, Treffpunkt, UebergabeSchritt } from './types';
 
@@ -29,6 +30,11 @@ export interface UebergabeErgebnis {
   auswertung: PlanAuswertung;
   delta: Delta;
   info: UebergabeInfo;
+}
+
+/** Ort einer Übergabe für Texte: „Treffpunkt Deichweg“ bzw. „Standort E-02“ (nach einer Panne) */
+export function ortName(name: string): string {
+  return name.startsWith('Standort ') ? name : `${G.treffpunkt} ${name}`;
 }
 
 /** Wie viele Kandidaten genau bewertet werden */
@@ -245,4 +251,83 @@ export function neueUebergaben(ctx: Kontext, alt: Plan, neu: Plan, aus: PlanAusw
     }
   }
   return erg;
+}
+
+// ---------------------------------------------------------------------------------------
+// Panne: Behälter am Standort des defekten Fahrzeugs an andere Touren übergeben
+// ---------------------------------------------------------------------------------------
+
+/**
+ * Kosten zum Vergleichen nach einer Panne: Euro plus hohe Strafe für jeden liegen gelassenen
+ * Behälter. Überstunden kosten ihren Zuschlag (steckt in den Euro); erst über 90 Minuten je
+ * Tour gelten sie als nicht zumutbar.
+ */
+function wert(aus: PlanAuswertung): number {
+  let zuViel = 0;
+  for (const t of Object.values(aus.touren)) zuViel += Math.max(0, t.ueberstundenMin - MAX_UEBERSTUNDEN_PANNE);
+  return aus.summe.kosten.summe + zuViel * STRAFE_UEBERSTUNDE + aus.liegen.behaelter.length * STRAFE_LIEGEN;
+}
+const MAX_UEBERSTUNDEN_PANNE = 90;
+const STRAFE_UEBERSTUNDE = 1000;
+const STRAFE_LIEGEN = 2000;
+
+/** Standort eines Fahrzeugs als Treffpunkt */
+export function standort(ctx: Kontext, tourId: string): Treffpunkt {
+  const t = ctx.tag.touren.find((x) => x.id === tourId)!;
+  return { id: `standort-${tourId}`, name: `Standort ${t.fahrzeugId}`, knoten: ctx.tag.start[tourId].knoten };
+}
+
+/**
+ * Panne bei Tour `tourId`: Die anderen Touren holen die Behälter am Standort ab. Je Behälter
+ * die günstigste Tour und Stelle; wer nur mit Überstunden übernehmen könnte, lässt es, dann
+ * bleibt der Behälter liegen. Am Ende wartet das defekte Fahrzeug in der Reihenfolge, in der
+ * die anderen ankommen.
+ */
+export function defektAuffangen(ctx: Kontext, plan: Plan, tourId: string): Plan {
+  const st = ctx.tag.start[tourId];
+  if (!st?.defekt) return plan;
+  const tp = standort(ctx, tourId);
+  const anBord = st.geladen.filter((b) => !st.erledigt.includes(b));
+  const eigene = (plan.touren[tourId]?.schritte ?? []).filter((s) => s.art === 'uebergabe');
+  let p: Plan = {
+    touren: { ...plan.touren, [tourId]: { schritte: eigene } },
+    liegenLassen: [...new Set([...plan.liegenLassen, ...anBord])],
+  };
+  let aus = bewertePlan(ctx, p);
+  if (!aus.gueltig) return plan;
+  // große Bezirke zuerst
+  const zeit = (b: string) => ctx.tag.behaelter[b].inhalt.pakete * 3 + ctx.tag.behaelter[b].inhalt.briefe;
+  for (const x of [...anBord].sort((a, b) => zeit(b) - zeit(a))) {
+    let best: { plan: Plan; aus: PlanAuswertung } | null = null;
+    for (const t of ctx.tag.touren) {
+      if (t.id === tourId || !kannUebergeben(ctx, t.id)) continue;
+      const sb = p.touren[t.id]?.schritte ?? [];
+      for (let j = 0; j <= sb.length; j++) {
+        const id = uebergabeId(tourId, t.id, [x], [], tp);
+        const ua: UebergabeSchritt = { art: 'uebergabe', id, treffpunkt: tp.knoten, treffpunktName: tp.name, partner: t.id, abgeben: [x], aufnehmen: [] };
+        const ub: UebergabeSchritt = { art: 'uebergabe', id, treffpunkt: tp.knoten, treffpunktName: tp.name, partner: tourId, abgeben: [], aufnehmen: [x] };
+        const neu: Plan = {
+          touren: { ...p.touren, [tourId]: { schritte: [...(p.touren[tourId]?.schritte ?? []), ua] }, [t.id]: { schritte: einbauen(ctx, sb, j, ub, [x]) } },
+          liegenLassen: p.liegenLassen.filter((b) => b !== x),
+        };
+        const a2 = bewertePlan(ctx, neu);
+        if (!a2.gueltig) continue;
+        if (!best || wert(a2) < wert(best.aus) - 1e-6) best = { plan: neu, aus: a2 };
+      }
+    }
+    if (best && wert(best.aus) < wert(aus) - 1e-6) {
+      p = best.plan;
+      aus = best.aus;
+    }
+  }
+  // das defekte Fahrzeug übergibt in der Reihenfolge, in der die anderen ankommen
+  const ank = new Map<string, number>();
+  for (const t of Object.values(aus.touren)) {
+    if (t.tourId === tourId) continue;
+    for (const s of t.schritte) if (s.schritt.art === 'uebergabe' && s.schritt.partner === tourId) ank.set(s.schritt.id, s.ankunft);
+  }
+  const sortiert = [...(p.touren[tourId]?.schritte ?? [])].sort((a, b) => (a.art === 'uebergabe' && b.art === 'uebergabe' ? (ank.get(a.id) ?? 0) - (ank.get(b.id) ?? 0) : 0));
+  const umgestellt: Plan = { ...p, touren: { ...p.touren, [tourId]: { schritte: sortiert } } };
+  const a3 = bewertePlan(ctx, umgestellt);
+  return a3.gueltig && wert(a3) <= wert(aus) + 1e-6 ? umgestellt : p;
 }

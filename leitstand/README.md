@@ -18,7 +18,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | fertig |
 | 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D), Übergaben am Treffpunkt | fertig |
 | 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | fertig |
-| 7 | Szenarien | offen |
+| 7 | Szenarien: Ausfall, Stau, Panne, Spitzentag | fertig |
 | 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
 
 ## Schnellstart
@@ -120,6 +120,7 @@ src/
     lagebild.ts     Lage aus dem Ereignisstrom: Positionen, Behälter, Fortschritt, Prognosen
     uebergabe.ts    Übergaben am Treffpunkt planen (abgeben, tauschen)
     benachrichtigung.ts  Nachrichten an die Fahrer/innen bei Umplanung
+    szenarien.ts    Ausfall, Stau (Sperrung), Panne, Spitzentag
     route.ts        Routengeometrie und Zeitpläne entlang der Route
     sendungen.ts    Pakete je Stopp, Briefe geschätzt nach Haushalten, erfundene Adressen
   worker/           Optimierung im Web Worker
@@ -180,6 +181,25 @@ Der Leitstand nutzt nur Daten, die bei der Arbeit ohnehin entstehen. Alles, was 
    „verstanden 10:03“.
 5. Menü → „Datenquellen“; dort lässt sich das Barcode-Etikett am Behälter ab- und anschalten.
 
+### Szenarien
+
+Knopf **Szenarien** (Handy: Menü ☰). Jedes Szenario ändert nur die Lage, nie den Plan; wie
+der Leitstand reagieren würde, steht danach unter **Vorschläge** (mit Vorschau, Δ € und
+Nachricht an die Fahrer/innen). Oben steht, welches Szenario läuft; ✕ führt zurück zum
+normalen Tag.
+
+| Szenario | was passiert | Reaktion des Leitstands |
+|---|---|---|
+| Zusteller fällt aus | Tag beginnt neu, eine Tour ist unbesetzt (oder ein Springer beginnt 60 Min später) | „4 Behälter bleiben heute liegen“ → „Ausfall Tour 3 auffangen“ verteilt sie |
+| Stau: Unfall auf der Mittelbrücke | ab 09:30 gesperrt, rot in der Szene | Routen und Prognosen mit Umweg, Vorschläge z. B. Übergabe gegen Überstunden |
+| Fahrzeugdefekt mittags | ab 11:30: das Fahrzeug fährt den laufenden Bezirk zu Ende und bleibt stehen (Panne-Label, Warnblinker) | „Panne Tour 2 auffangen“: die anderen holen die Behälter am Standort ab |
+| Spitzentag | Tag beginnt neu mit +40 % Menge (Annahme, einstellbar) | Überstunden im Startplan, Vorschläge bauen sie ab |
+
+Die Panne kann auch die Fahrerin oder der Fahrer melden: Geräte-Ansicht → **Panne melden**.
+Die Szenarien liegen in `src/core/szenarien.ts`; Panne in Lagebild und Simulation, das
+Auffangen in `src/core/uebergabe.ts` (`defektAuffangen`, Überstunden bis 90 Min je Tour
+gelten dabei als zumutbar).
+
 ### Benachrichtigungen an die Fahrer/innen
 
 Jede übernommene Umplanung (auch Rückgängig) schickt jeder betroffenen Tour eine Nachricht
@@ -211,6 +231,19 @@ Zeitpunkt (`src/core/uebergabe.ts`). Die Simulation fährt beide Fahrzeuge hin u
 Umladen die üblichen Scans im übernehmenden Fahrzeug (`BEHAELTER_VERLADEN` mit Etikett,
 sonst die `PAKET_IN_FAHRZEUG`-Scans der Pakete). Daran erkennt das Lagebild, dass die
 Übergabe stattgefunden hat – es gibt dafür kein eigenes Ereignis und keine neue Hardware.
+
+### So testest du Phase 7
+
+1. `npm run dev`, oben **Szenarien** → „Zusteller fällt aus“ (Tour 3) → Starten. Links steht
+   „4 Behälter bleiben heute liegen“; die Vorschläge öffnen sich mit „Ausfall Tour 3
+   auffangen“ → In 3D ansehen → Übernehmen. Die Warnung verschwindet.
+2. **Szenarien** → „Stau“ → Starten: Die Uhr springt auf 09:30, die Mittelbrücke ist rot
+   gesperrt. ▶ (60×): die Fahrzeuge fahren über Nord- und Südbrücke.
+3. **Szenarien** → „Fahrzeugdefekt“ → Starten: 11:30, Tour 2 meldet eine Panne. Vorschlag
+   „Panne Tour 2 auffangen“ mit Übergabe am Standort → Übernehmen; Tour 2 und der Abholer
+   bekommen ihre Nachricht.
+4. **Szenarien** → „Spitzentag“: Überstunden-Prognose deutlich höher, Vorschläge bauen sie ab.
+5. Oben beim Szenario ✕ → normaler Tag. Mit Geräte-Fenster: dort **Panne melden**.
 
 ### So testest du Phase 6
 

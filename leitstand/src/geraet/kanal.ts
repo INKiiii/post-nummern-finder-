@@ -21,7 +21,8 @@ export type VomGeraet =
   | { typ: 'anmelden'; tourId: string; geraetId: string }
   | { typ: 'lebenszeichen'; tourId: string; geraetId: string }
   | { typ: 'abmelden'; tourId: string; geraetId: string }
-  | { typ: 'bestaetigung'; tourId: string; nachrichtId: string; zeit: number };
+  | { typ: 'bestaetigung'; tourId: string; nachrichtId: string; zeit: number }
+  | { typ: 'stoerung'; tourId: string };
 
 function kanal(): BroadcastChannel | null {
   return typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(KANAL);
@@ -97,6 +98,11 @@ export class GeraeteKanal {
 
   lebenszeichen(): void {
     this.k?.postMessage({ typ: 'lebenszeichen', tourId: this.tourId, geraetId: this.geraetId } satisfies VomGeraet);
+  }
+
+  /** Fahrer/in meldet eine Panne */
+  stoerungMelden(): void {
+    this.k?.postMessage({ typ: 'stoerung', tourId: this.tourId } satisfies VomGeraet);
   }
 
   bestaetigen(nachrichtId: string, zeit: number): void {

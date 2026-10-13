@@ -42,6 +42,8 @@ export interface SimOptionen {
 }
 
 const GRUENDE = ['Empfänger nicht angetroffen', 'Annahme verweigert', 'Adresse nicht auffindbar'];
+/** nach einer Panne: so lange steht das Fahrzeug nach der letzten Übergabe noch (Abschleppen) */
+const ABSCHLEPPEN_MIN = 30;
 const UNGENAUIGKEIT_KM = 0.012;
 
 interface Ablauf {
@@ -66,6 +68,8 @@ interface Ablauf {
   ladung: string[];
   /** Behälter, deren Bezirk fertig zugestellt ist */
   erledigt: Set<string>;
+  /** Panne: fährt nicht mehr, nur noch Übergaben am Standort, dann Abschleppen */
+  defekt: boolean;
 }
 
 type Geplant = NeuesScanEreignis & { _tour: string | null; _seq: number };
@@ -190,10 +194,10 @@ export class SimulierteScanner implements ScanQuelle {
           if (tr !== undefined && tr <= tCommit + 1e-9 && this.uebergabeVorbei(a, x.id, sCommit)) continue;
           rest.push(x);
           for (const b of x.aufnehmen) kommt.add(b);
-        } else if (!a.erledigt.has(x.behaelterId) && (anBord.has(x.behaelterId) || kommt.has(x.behaelterId))) rest.push(x);
+        } else if (!a.defekt && !a.erledigt.has(x.behaelterId) && (anBord.has(x.behaelterId) || kommt.has(x.behaelterId))) rest.push(x);
       }
       const knoten = a.route.knoten[Math.min(a.route.knoten.length - 1, Math.max(0, a.route.s.findIndex((x) => x >= sCommit - 1e-9)))];
-      const neueRoute = baueRoute(ctx, knoten, routenSchritte(rest), true);
+      const neueRoute = baueRoute(ctx, knoten, routenSchritte(rest), !a.defekt);
       const neuerZp = this.istZeitplan(neueRoute, tCommit, a);
       a.route = verketteRoute(a.route, sCommit, neueRoute);
       a.zpBasis = verketteZeitplan(a.zp, sCommit, tCommit, neuerZp);
@@ -205,6 +209,16 @@ export class SimulierteScanner implements ScanQuelle {
     }
     this.abgleichen(neu);
     this.sortieren();
+  }
+
+  /**
+   * Panne: Ab der nächsten Planung (Punkt gibt der Leitstand vor) fährt das Fahrzeug nicht
+   * mehr; es bleibt stehen, übergibt nur noch am Standort und meldet sich nach dem
+   * Abschleppen ab.
+   */
+  defektSetzen(tourId: string): void {
+    const a = this.ablaeufe.get(tourId);
+    if (a) a.defekt = true;
   }
 
   /** Ist-Position (nur für Tests und Fehlersuche, nie für den Leitstand) */
@@ -259,7 +273,9 @@ export class SimulierteScanner implements ScanQuelle {
     }
     for (const id of betroffen) {
       const a = this.ablaeufe.get(id)!;
-      const zp = zeitplaene.get(id)!;
+      let zp = zeitplaene.get(id)!;
+      // Panne: nach der letzten Übergabe noch abschleppen, dann abmelden
+      if (a.defekt) zp = { s: [...zp.s, zp.s[zp.s.length - 1]], t: [...zp.t, zp.t[zp.t.length - 1] + ABSCHLEPPEN_MIN] };
       const ab = neu.has(id) ? a.abT : Math.max(a.abT, this.zeit);
       a.zp = zp;
       a.ende = zp.t[zp.t.length - 1];
@@ -337,6 +353,7 @@ export class SimulierteScanner implements ScanQuelle {
       schritte,
       ladung,
       erledigt: new Set(),
+      defekt: false,
     };
     a.zpBasis = this.istZeitplan(route, abfahrt, a);
     a.zp = a.zpBasis;

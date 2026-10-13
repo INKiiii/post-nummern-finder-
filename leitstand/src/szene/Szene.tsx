@@ -11,6 +11,7 @@ import { Haeuser } from './Haeuser';
 import { Kamera, startKamera } from './Kamera';
 import { LabelProjektor } from './LabelProjektor';
 import { LichtUndHimmel } from './LichtUndHimmel';
+import { Sperrungen } from './Sperrungen';
 import { Spuren } from './Spuren';
 import { Strassen } from './Strassen';
 import { VorschauSzene } from './VorschauSzene';
@@ -48,6 +49,7 @@ export function Szene() {
       <Fahrzeuge ctx={ctx} />
       <Beschriftungen ctx={ctx} />
       <Spuren ctx={ctx} />
+      <Sperrungen welt={ctx.welt} />
       <VorschauSzene />
       <Ziehen />
       <LabelProjektor />

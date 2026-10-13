@@ -11,6 +11,7 @@ import { G } from '../glossar';
 import { fmtUhr } from './format';
 import { behaelterFolge, type Kontext, type PlanAuswertung } from './modell';
 import type { Plan, UebergabeSchritt } from './types';
+import { ortName } from './uebergabe';
 
 export type PunktArt = 'neu' | 'abgeben' | 'entfaellt' | 'bleibt' | 'uebergabeEntfaellt' | 'reihenfolge' | 'tourEntfaellt' | 'tourNeu';
 
@@ -86,7 +87,7 @@ export function umplanungsNachrichten(
           art: 'abgeben',
           behaelterId: b,
           zeit: zeitNeu.get(u.id),
-          text: `Abgeben: ${G.behaelter} ${b}, Übergabe ${uhr(zeitNeu, u.id)}am ${G.treffpunkt} ${u.treffpunktName} (an ${name(u.partner)})`,
+          text: `Abgeben: ${G.behaelter} ${b}, Übergabe ${uhr(zeitNeu, u.id)}am ${ortName(u.treffpunktName)} (an ${name(u.partner)})`,
         });
     }
     // neue Behälter: über eine Übergabe, aus der Halle oder schon an Bord
@@ -98,7 +99,7 @@ export function umplanungsNachrichten(
           art: 'neu',
           behaelterId: b,
           zeit: zeitNeu.get(u.id),
-          text: `Neu: ${G.behaelter} ${b}, Übergabe ${uhr(zeitNeu, u.id)}am ${G.treffpunkt} ${u.treffpunktName} (von ${name(u.partner)})`,
+          text: `Neu: ${G.behaelter} ${b}, Übergabe ${uhr(zeitNeu, u.id)}am ${ortName(u.treffpunktName)} (von ${name(u.partner)})`,
         });
       else if (st.geladen.includes(b)) punkte.push({ art: 'bleibt', behaelterId: b, text: `${G.behaelter} ${b} bleibt im ${G.fahrzeug} (${bezirk(b)}).` });
       else if (st.mussLaden) punkte.push({ art: 'neu', behaelterId: b, text: `Neu: ${G.behaelter} ${b} (${bezirk(b)}), an ${G.rampe} ${t.rampe} laden` });
@@ -117,7 +118,7 @@ export function umplanungsNachrichten(
     // Übergaben, die nicht mehr stattfinden
     for (const u of ua) {
       if (unIds.has(u.id)) continue;
-      punkte.push({ art: 'uebergabeEntfaellt', zeit: zeitAlt.get(u.id), text: `Übergabe ${uhr(zeitAlt, u.id)}am ${G.treffpunkt} ${u.treffpunktName} entfällt.` });
+      punkte.push({ art: 'uebergabeEntfaellt', zeit: zeitAlt.get(u.id), text: `Übergabe ${uhr(zeitAlt, u.id)}am ${ortName(u.treffpunktName)} entfällt.` });
     }
     // nur die Reihenfolge ist anders
     const gleicheMenge = fa.length === fn.length && fa.every((b) => fn.includes(b));
