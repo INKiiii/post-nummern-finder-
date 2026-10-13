@@ -25,7 +25,13 @@ export type VomGeraet =
   | { typ: 'stoerung'; tourId: string };
 
 function kanal(): BroadcastChannel | null {
-  return typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(KANAL);
+  if (typeof BroadcastChannel === 'undefined') return null;
+  try {
+    return new BroadcastChannel(KANAL);
+  } catch {
+    // z. B. in einem abgeschotteten Rahmen: der Leitstand läuft dann ohne Geräte-Fenster
+    return null;
+  }
 }
 
 /** Leitstand-Seite: erfüllt die Schnittstelle FahrerGeraet für alle Touren */

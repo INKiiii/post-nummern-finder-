@@ -38,7 +38,9 @@ Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
 | Adresse | Seite |
 |---|---|
 | `#/` | 3D-Leitstand |
-| `?demo` | 3D-Leitstand, die geführte Demo startet sofort (für Aufnahmen) |
+| `?demo` oder `#demo` | 3D-Leitstand, die geführte Demo startet sofort (für Aufnahmen) |
+
+Statt `#/zahlen` geht auch `#zahlen` (ebenso `#datenquellen`, `#kern`), z. B. für Einbettungen, die nur einfache Anker weitergeben. Eingebettet in einen fremden Rahmen blendet die Seite „Idee in Zahlen“ den Drucken-Knopf aus.
 | `#/zahlen` | Idee in Zahlen (druckbar) |
 | `#/datenquellen` | Datenquellen: was der Leitstand braucht |
 | `#/fahrer` | Geräte-Ansicht der Fahrer/innen (eigenes Fenster) |

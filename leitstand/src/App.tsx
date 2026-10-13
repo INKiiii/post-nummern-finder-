@@ -9,41 +9,44 @@ import { Leitstand } from './ui/Leitstand';
 import { RechenwegDialog } from './ui/Rechenweg';
 import { useSimulationsTakt } from './ui/takt';
 
-function useHash(): string {
-  const [hash, setHash] = useState(() => window.location.hash);
+/** Seite aus der Adresse: „#/zahlen“ und „#zahlen“ führen zur selben Seite („zahlen“) */
+function useSeite(): string {
+  const lesen = () => window.location.hash.replace(/^#\/?/, '');
+  const [seite, setSeite] = useState(lesen);
   useEffect(() => {
-    const f = () => setHash(window.location.hash);
+    const f = () => setSeite(lesen());
     window.addEventListener('hashchange', f);
     return () => window.removeEventListener('hashchange', f);
   }, []);
-  return hash;
+  return seite;
 }
 
 export function App() {
-  const hash = useHash();
+  const seite = useSeite();
   // Geräte-Ansicht: eigenes Fenster, eigene Daten, nur über die Schnittstelle FahrerGeraet verbunden
-  if (hash.startsWith('#/fahrer')) {
-    const tour = hash.split('/')[2] || null;
+  if (seite.startsWith('fahrer')) {
+    const tour = seite.split('/')[1] || null;
     return <ScannerApp key={tour ?? 'wahl'} tourId={tour} />;
   }
-  return <LeitstandFenster hash={hash} />;
+  return <LeitstandFenster seite={seite} />;
 }
 
-function LeitstandFenster({ hash }: { hash: string }) {
+function LeitstandFenster({ seite }: { seite: string }) {
   const laden = useLeitstand((s) => s.laden);
   const geladen = useLeitstand((s) => !!s.welt);
   useEffect(() => {
     void laden();
   }, [laden]);
   useSimulationsTakt();
-  // ?demo startet die geführte Demo gleich nach dem Laden (z. B. für eine Aufnahme)
+  // ?demo oder #demo startet die geführte Demo gleich nach dem Laden (z. B. für eine Aufnahme)
+  const demoAdresse = seite === 'demo';
   useEffect(() => {
-    if (geladen && new URLSearchParams(window.location.search).has('demo')) demoLos();
-  }, [geladen]);
-  const leitstand = hash === '' || hash === '#/' || hash === '#';
+    if (geladen && (demoAdresse || new URLSearchParams(window.location.search).has('demo'))) demoLos();
+  }, [geladen, demoAdresse]);
+  const leitstand = seite === '' || seite === 'demo';
   return (
     <>
-      {hash === '#/kern' ? <KernAnsicht /> : hash === '#/datenquellen' ? <Datenquellen /> : hash === '#/zahlen' ? <IdeeInZahlen /> : <Leitstand />}
+      {seite === 'kern' ? <KernAnsicht /> : seite === 'datenquellen' ? <Datenquellen /> : seite === 'zahlen' ? <IdeeInZahlen /> : <Leitstand />}
       <RechenwegDialog />
       <DemoOverlay unten={!leitstand} />
     </>

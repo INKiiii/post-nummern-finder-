@@ -17,6 +17,15 @@ import { useLeitstand } from '../state/store';
 import { AnnahmenPanel } from './AnnahmenPanel';
 import { RechenwegInhalt, WertKnopf } from './Rechenweg';
 
+/** In einem fremden Rahmen (z. B. eingebettet) lässt sich meist nicht drucken */
+const IM_RAHMEN = (() => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+})();
+
 const farbe = (x: number) => (Math.abs(x) < 0.005 ? '' : x > 0 ? 'gut' : 'schlecht');
 
 /** „132 Pakete, ≈ 1.890 Briefe (geschätzt), 135 Zeitungen“ */
@@ -58,9 +67,11 @@ export function IdeeInZahlen() {
           <a className="knopf" href="#/" style={{ textDecoration: 'none' }}>
             ← 3D-{G.leitstand}
           </a>
-          <button className="knopf" onClick={() => window.print()}>
-            Drucken / PDF
-          </button>
+          {!IM_RAHMEN && (
+            <button className="knopf" onClick={() => window.print()}>
+              Drucken / PDF
+            </button>
+          )}
         </div>
       </header>
       {!zahlen || !rctx ? (
