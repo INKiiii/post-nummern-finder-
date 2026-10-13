@@ -2,7 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { Color, DirectionalLight, Fog, HemisphereLight, Object3D, Vector3 } from 'three';
 import { useAnsicht } from '../state/ansicht';
-import { useLeitstand } from '../state/store';
+import { simUhr } from '../state/store';
 import { lichtZurZeit } from './licht';
 
 const ziel = new Vector3();
@@ -27,7 +27,7 @@ export function LichtUndHimmel() {
   }, [scene]);
 
   useFrame(({ camera }) => {
-    const l = lichtZurZeit(useLeitstand.getState().zeit);
+    const l = lichtZurZeit(simUhr.zeit);
     const s = sonne.current;
     const h = hemi.current;
     if (!s || !h) return;

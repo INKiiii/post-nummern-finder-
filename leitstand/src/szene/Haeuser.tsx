@@ -1,10 +1,12 @@
-import type { ThreeEvent } from '@react-three/fiber';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Color, InstancedMesh, Object3D } from 'three';
 import { behaelterFolge } from '../core/modell';
 import { zufall } from '../core/rng';
+import { ANZEIGE_VERZOEGERUNG_MIN, zustellungenIm } from '../core/lagebild';
 import type { Plan, Tag, Welt } from '../core/types';
 import { useAnsicht } from '../state/ansicht';
+import { simUhr, useLeitstand } from '../state/store';
 import { THEME } from '../theme';
 import { aktiveBezirke, bezirkMitte } from './auswahl';
 import { setzeAnker } from './beschriftung';
@@ -28,6 +30,11 @@ const FORMEN = [
 ];
 
 const dummy = new Object3D();
+/** So lange (Sim-Minuten) leuchtet ein Haus nach dem Zustellscan nach */
+export const LEUCHT_MIN = 2.5;
+const GELB = new Color(THEME.szene.leuchten);
+const ORANGE = new Color(THEME.szene.leuchtenNicht);
+
 
 /** Alle Häuser als zwei Instanced Meshes (Körper und Dach) */
 export function Haeuser({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan }) {
@@ -36,6 +43,18 @@ export function Haeuser({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan 
   const [hoverHaus, setHoverHaus] = useState<number | null>(null);
   const { qualitaet, tourDaecher, auswahl, waehlen, hovern, fliegen, tippSetzen, kameraAbstand } = useAnsicht();
   const geo = useMemo(() => ({ koerper: hausGeometrie(), dach: dachGeometrie() }), []);
+  /** Grundfarben (ohne Leuchten) und gerade leuchtende Häuser */
+  const grund = useRef<{ koerper: Color[]; dach: Color[] }>({ koerper: [], dach: [] });
+  const leuchtend = useRef(new Map<number, number>());
+  const hausVonStopp = useMemo(() => {
+    const m = new Map<number, number[]>();
+    welt.haeuser.forEach((h, i) => {
+      const l = m.get(h.stoppId);
+      if (l) l.push(i);
+      else m.set(h.stoppId, [i]);
+    });
+    return m;
+  }, [welt]);
 
   const formen = useMemo<HausForm[]>(() => {
     const rng = zufall(welt.seed + 21);
@@ -93,15 +112,56 @@ export function Haeuser({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan 
       if (aktiv && imFokus) c.lerp(hell, 0.6);
       if (!imFokus) c.multiplyScalar(0.86);
       koerper.current!.setColorAt(i, c);
+      grund.current.koerper[i] = c.clone();
       c.copy(f.ziegel);
       const tf = tourJeBezirk.get(bezirk);
       if (tourDaecher) c.lerp(tf ? new Color(tf) : grau, 0.78);
       if (!imFokus) c.lerp(grau, 0.45);
       daecher.current!.setColorAt(i, c);
+      grund.current.dach[i] = c.clone();
     });
     koerper.current!.instanceColor!.needsUpdate = true;
     daecher.current!.instanceColor!.needsUpdate = true;
+    leuchtend.current = new Map();
   }, [welt, formen, tourJeBezirk, tourDaecher, aktiv]);
+
+  // Häuser leuchten kurz auf, wenn dort ein Paket zugestellt wurde (aus den Zustellscans),
+  // zeitgleich mit dem angezeigten Fahrzeug (das eine Minute hinter den Meldungen fährt)
+  useFrame(() => {
+    const lage = useLeitstand.getState().lage;
+    const k = koerper.current;
+    const d = daecher.current;
+    if (!k || !d || grund.current.koerper.length === 0) return;
+    const bis = simUhr.zeit - ANZEIGE_VERZOEGERUNG_MIN;
+    const neu = new Map<number, number>();
+    const farbe = new Map<number, Color>();
+    if (lage) {
+      for (const z of zustellungenIm(lage.zustellungen, bis - LEUCHT_MIN, bis)) {
+        const staerke = 1 - (bis - z.t) / LEUCHT_MIN;
+        for (const i of hausVonStopp.get(z.stoppId) ?? []) {
+          if ((neu.get(i) ?? 0) >= staerke) continue;
+          neu.set(i, staerke);
+          farbe.set(i, z.ok ? GELB : ORANGE);
+        }
+      }
+    }
+    const alt = leuchtend.current;
+    if (neu.size === 0 && alt.size === 0) return;
+    const c = new Color();
+    for (const i of alt.keys()) {
+      if (neu.has(i)) continue;
+      k.setColorAt(i, grund.current.koerper[i]);
+      d.setColorAt(i, grund.current.dach[i]);
+    }
+    for (const [i, st] of neu) {
+      const e = Math.min(1, st * 1.4);
+      k.setColorAt(i, c.copy(grund.current.koerper[i]).lerp(farbe.get(i)!, 0.85 * e));
+      d.setColorAt(i, c.copy(grund.current.dach[i]).lerp(farbe.get(i)!, 0.6 * e));
+    }
+    leuchtend.current = neu;
+    k.instanceColor!.needsUpdate = true;
+    d.instanceColor!.needsUpdate = true;
+  });
 
   const bezirkVon = (i: number) => welt.stopps[welt.haeuser[i].stoppId].bezirkId;
 

@@ -101,6 +101,28 @@ export interface Pose {
   y: number;
   richtung: number;
   anRampe: boolean;
+  /** Übergang zwischen Rampe und Route: Abfahrt (0 = Rampe … 1 = Route) bzw. Ankunft (0 = Route … 1 = Rampe) */
+  uebergang: { art: 'abfahrt' | 'ankunft'; anteil: number } | null;
+}
+
+export interface Zustellung {
+  t: number;
+  stoppId: number;
+  ok: boolean;
+}
+
+/** Zustellungen im Fenster (von, bis] – die Liste ist zeitlich sortiert */
+export function zustellungenIm(liste: readonly Zustellung[], von: number, bis: number): Zustellung[] {
+  let lo = 0;
+  let hi = liste.length;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (liste[m].t <= von) lo = m + 1;
+    else hi = m;
+  }
+  const erg: Zustellung[] = [];
+  for (let i = lo; i < liste.length && liste[i].t <= bis; i++) erg.push(liste[i]);
+  return erg;
 }
 
 /** Wie weit darf eine Meldung neben der Route liegen, um noch zugeordnet zu werden (km) */
@@ -116,6 +138,8 @@ export class Lagebild {
   private beh = new Map<string, BehaelterLage>();
   private sendungen = new Map<string, { behaelter: string; stopp: number; status: 'basis' | 'fahrzeug' | 'zugestellt' | 'nicht'; fahrzeug?: string }>();
   private bez = new Map<string, BezirkLage>();
+  /** Zustellscans in zeitlicher Reihenfolge (z. B. für das Leuchten der Häuser) */
+  readonly zustellungen: Zustellung[] = [];
   /** Zähler je Ereignisart */
   zaehler: Record<string, number> = {};
   anzahl = 0;
@@ -306,6 +330,7 @@ export class Lagebild {
           bz.pakete.nicht++;
         }
         f.letzterScan = e.zeit;
+        this.zustellungen.push({ t: e.zeit, stoppId: p.stopp, ok: e.art === 'ZUSTELLUNG' });
         // Der Zustellscan zeigt, an welchem Stopp das Fahrzeug ist
         const st = f.route.stopps.find((x) => x.stoppId === p.stopp && x.behaelterId === p.behaelter);
         if (st && f.phase === 'unterwegs') this.fortschritt(f, st.s, e.zeit);
@@ -437,38 +462,48 @@ export class Lagebild {
   pose(tourId: string, zeit: number): Pose {
     const f = this.fz.get(tourId)!;
     const anzeige = zeit - ANZEIGE_VERZOEGERUNG_MIN;
-    if (f.phase !== 'unterwegs' && !(f.phase === 'zurueck' && f.tourEnde !== null && anzeige < f.tourEnde)) {
-      return { x: NaN, y: NaN, richtung: 0, anRampe: true };
+    const rampe: Pose = { x: NaN, y: NaN, richtung: 0, anRampe: true, uebergang: null };
+    if (f.phase === 'rampe' || f.phase === 'laedt' || f.tourStart === null) return rampe;
+    // Rückkehr: noch eine Minute vom Hof an die Rampe
+    if (f.phase === 'zurueck' && f.tourEnde !== null && anzeige >= f.tourEnde) {
+      const anteil = (anzeige - f.tourEnde) / ANZEIGE_VERZOEGERUNG_MIN;
+      if (anteil >= 1) return rampe;
+      return { ...punktBei(f.route, f.route.laenge), anRampe: false, uebergang: { art: 'ankunft', anteil } };
+    }
+    // Abfahrt: in der ersten Minute von der Rampe auf den Hof
+    if (anzeige < f.tourStart) {
+      const anteil = Math.max(0, Math.min(1, (zeit - f.tourStart) / ANZEIGE_VERZOEGERUNG_MIN));
+      return { ...punktBei(f.route, 0), anRampe: false, uebergang: { art: 'abfahrt', anteil } };
     }
     const fx = f.fixes;
-    if (fx.length === 0) {
-      const p = punktBei(f.route, 0);
-      return { ...p, anRampe: false };
-    }
+    if (fx.length === 0) return { ...punktBei(f.route, 0), anRampe: false, uebergang: null };
     let i = fx.length - 1;
     while (i > 0 && fx[i].t > anzeige) i--;
     const a = fx[i];
     const b = fx[i + 1];
     if (!b || anzeige <= a.t) {
-      if (a.s !== null) return { ...punktBei(f.route, a.s), anRampe: false };
-      return { x: a.x, y: a.y, richtung: 0, anRampe: false };
+      if (a.s !== null) return { ...punktBei(f.route, a.s), anRampe: false, uebergang: null };
+      return { x: a.x, y: a.y, richtung: 0, anRampe: false, uebergang: null };
     }
     const u = Math.max(0, Math.min(1, (anzeige - a.t) / (b.t - a.t)));
-    if (a.s !== null && b.s !== null) return { ...punktBei(f.route, a.s + (b.s - a.s) * u), anRampe: false };
-    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, richtung: Math.atan2(b.y - a.y, b.x - a.x), anRampe: false };
+    if (a.s !== null && b.s !== null) return { ...punktBei(f.route, a.s + (b.s - a.s) * u), anRampe: false, uebergang: null };
+    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, richtung: Math.atan2(b.y - a.y, b.x - a.x), anRampe: false, uebergang: null };
   }
 
   /** gefahrene Strecke laut Anzeige (für Spuren) */
   anzeigeS(tourId: string, zeit: number): number {
     const f = this.fz.get(tourId)!;
     if (f.phase === 'rampe' || f.phase === 'laedt') return 0;
+    if (f.phase === 'zurueck' && f.tourEnde !== null && zeit - ANZEIGE_VERZOEGERUNG_MIN >= f.tourEnde) return f.route.laenge;
     const anzeige = zeit - ANZEIGE_VERZOEGERUNG_MIN;
-    const fx = f.fixes.filter((x) => x.s !== null);
-    if (!fx.length) return 0;
+    const fx = f.fixes;
     let i = fx.length - 1;
-    while (i > 0 && fx[i].t > anzeige) i--;
+    while (i >= 0 && (fx[i].s === null || fx[i].t > anzeige)) i--;
+    if (i < 0) return 0;
     const a = fx[i];
-    const b = fx[i + 1];
+    let j = i + 1;
+    while (j < fx.length && fx[j].s === null) j++;
+    const b = fx[j];
     if (!b || anzeige <= a.t) return a.s!;
     return a.s! + (b.s! - a.s!) * Math.max(0, Math.min(1, (anzeige - a.t) / (b.t - a.t)));
   }

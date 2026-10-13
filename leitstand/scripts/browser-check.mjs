@@ -85,9 +85,15 @@ try {
     await bild(page, `${name}-3d-basis`);
 
     s('Uhr läuft (Beladen)');
+    if ((await page.locator('.regler-marken span').count()) < 3) fehler.push(`[${name}] Zeitleiste ohne Stundenmarken`);
     await zeitStellen(page, 7 * 60 + 18);
     await page.waitForTimeout(1500);
     await bild(page, `${name}-3d-beladen`);
+
+    s('Abfahrt');
+    await zeitStellen(page, 7 * 60 + 31.5);
+    await page.waitForTimeout(1200);
+    await bild(page, `${name}-3d-abfahrt`);
 
     s('Vormittag');
     await zeitStellen(page, 10 * 60);
@@ -106,6 +112,19 @@ try {
     await bild(page, `${name}-3d-fahrzeug`);
     const geschaetzt = await page.locator('.panel .marke.geschaetzt').count();
     if (!geschaetzt) fehler.push(`[${name}] Fahrzeug-Panel zeigt keine Kennzeichnung „geschätzt“`);
+
+    if (!schmal) {
+      s('Folgen beim Zoomen');
+      const cb = await page.locator('canvas').first().boundingBox();
+      await page.mouse.move(cb.x + cb.width * 0.3, cb.y + cb.height * 0.35);
+      await page.mouse.wheel(0, -250);
+      await page.waitForTimeout(1500);
+      const l1 = await page.locator('.fahrzeug-label.aktiv').boundingBox();
+      await page.waitForTimeout(2500);
+      const l2 = await page.locator('.fahrzeug-label.aktiv').boundingBox();
+      if (l1 && l2 && Math.hypot(l2.x - l1.x, l2.y - l1.y) > 80) fehler.push(`[${name}] Kamera folgt dem Fahrzeug nach dem Zoomen nicht (${Math.round(l1.x)},${Math.round(l1.y)} → ${Math.round(l2.x)},${Math.round(l2.y)})`);
+      await bild(page, `${name}-3d-folgen`);
+    }
 
     s('Geräte-Ansicht');
     const geraet = await ctx.newPage();
@@ -141,6 +160,22 @@ try {
           await page.waitForTimeout(500);
         }
       }
+    }
+
+    if (!schmal) {
+      s('Tasten');
+      await page.evaluate(() => document.activeElement?.blur());
+      const uhr = () => page.locator('.ls-uhr .uhr-klein').first().textContent();
+      const vorher = await uhr();
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(400);
+      const nachher = await uhr();
+      const min = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+      if (min(nachher) - min(vorher) !== 10) fehler.push(`[${name}] Pfeiltaste stellt die Uhr nicht 10 Minuten vor (${vorher} → ${nachher})`);
+      await page.keyboard.press(' ');
+      await page.waitForSelector('button[aria-label="Pause"]', { timeout: 3000 }).catch(() => fehler.push(`[${name}] Leertaste startet die Uhr nicht`));
+      await page.keyboard.press(' ');
+      await page.waitForSelector('button[aria-label="Start"]', { timeout: 3000 }).catch(() => fehler.push(`[${name}] Leertaste hält die Uhr nicht an`));
     }
 
     s('Draufsicht');

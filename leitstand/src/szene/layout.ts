@@ -52,3 +52,61 @@ export function hallenPlatz(welt: Welt, tag: Tag, plan: Plan, behaelterId: strin
   const j = Math.max(0, ohne.indexOf(behaelterId));
   return { x: m.x + 3.5 + (j % 6) * 0.3, z: m.z + 1.6 + Math.floor(j / 6) * 0.3, rot: 0 };
 }
+
+type Punkt = { x: number; z: number };
+
+function bezier(a: Punkt, b: Punkt, c: Punkt, t: number): { p: Punkt; d: Punkt } {
+  const s = 1 - t;
+  return {
+    p: { x: s * s * a.x + 2 * s * t * b.x + t * t * c.x, z: s * s * a.z + 2 * s * t * b.z + t * t * c.z },
+    d: { x: 2 * s * (b.x - a.x) + 2 * t * (c.x - b.x), z: 2 * s * (b.z - a.z) + 2 * t * (c.z - b.z) },
+  };
+}
+
+const glatt = (u: number) => {
+  const v = Math.max(0, Math.min(1, u));
+  return v * v * (3 - 2 * v);
+};
+/** Szene-Richtung (dx, dz) → rotation.y */
+const winkelVon = (d: Punkt) => Math.atan2(-d.z, d.x);
+
+/** Abfahrt: vorwärts von der Rampe über den Hof bis zum Hoftor (u = 0…1) */
+export function abfahrtPose(rampe: Pose, tor: Punkt, u: number): Pose {
+  const { p, d } = bezier({ x: rampe.x, z: rampe.z }, { x: rampe.x, z: rampe.z - 4 }, tor, glatt(u));
+  return { x: p.x, z: p.z, rot: winkelVon(d) };
+}
+
+/** Ankunft: vom Hoftor in den Hof, dann rückwärts an die Rampe (u = 0…1) */
+export function ankunftPose(rampe: Pose, tor: Punkt, u: number): Pose {
+  const seite = rampe.x >= tor.x ? 1 : -1;
+  const wende = { x: rampe.x + 2.6 * seite, z: rampe.z - 3.6 };
+  const vor = { x: rampe.x, z: rampe.z - 2.4 };
+  if (u < 0.5) {
+    // vorwärts zur Wendestelle, Blick schon in Richtung Rückwärtsfahrt
+    const r = { x: wende.x - vor.x, z: wende.z - vor.z };
+    const l = Math.hypot(r.x, r.z) || 1;
+    const k = { x: wende.x - (r.x / l) * 2.5, z: wende.z - (r.z / l) * 2.5 };
+    const { p, d } = bezier(tor, k, wende, glatt(u / 0.5));
+    return { x: p.x, z: p.z, rot: winkelVon(d) };
+  }
+  const { p, d } = bezier(wende, vor, { x: rampe.x, z: rampe.z }, glatt((u - 0.5) / 0.5));
+  // rückwärts: Front zeigt entgegen der Bewegung
+  return { x: p.x, z: p.z, rot: winkelVon({ x: -d.x, z: -d.z }) };
+}
+
+/** Rollweg: Platz → Tür → in den Laderaum des Fahrzeugs (u = 0…1, sanft beschleunigt) */
+export function rollPosition(platz: Pose, tuer: { x: number; z: number }, fahrzeug: Pose, u: number): { x: number; z: number } {
+  const a = { x: platz.x, z: platz.z };
+  const b = { x: tuer.x, z: tuer.z + 0.12 };
+  const c = { x: fahrzeug.x, z: fahrzeug.z + 0.15 };
+  const l1 = Math.hypot(b.x - a.x, b.z - a.z);
+  const l2 = Math.hypot(c.x - b.x, c.z - b.z);
+  const e = u * u * (3 - 2 * u);
+  const s = e * (l1 + l2);
+  if (s <= l1 || l2 === 0) {
+    const k = l1 > 0 ? s / l1 : 1;
+    return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k };
+  }
+  const k = Math.min(1, (s - l1) / l2);
+  return { x: b.x + (c.x - b.x) * k, z: b.z + (c.z - b.z) * k };
+}

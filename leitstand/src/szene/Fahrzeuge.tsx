@@ -9,7 +9,7 @@ import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
 import { simUhr, useLeitstand } from '../state/store';
 import { setzeAnker } from './beschriftung';
 import { S } from './koord';
-import { rampenPose } from './layout';
+import { abfahrtPose, ankunftPose, rampenPose } from './layout';
 import { textTextur } from './textur';
 import { Umriss, umrissDicke } from './Umriss';
 
@@ -23,8 +23,21 @@ const GEO = {
   streifen: new BoxGeometry(0.85, 0.07, 0.525).translate(-0.17, 0.36, 0),
   dach: new BoxGeometry(0.8, 0.012, 0.48).translate(-0.17, 0.696, 0),
   rad: new CylinderGeometry(0.1, 0.1, 0.07, 10).rotateX(Math.PI / 2),
+  /** Felgenstrich, damit man das Drehen sieht */
+  felge: new BoxGeometry(0.15, 0.03, 0.074),
   licht: new BoxGeometry(0.02, 0.05, 0.08),
+  blinker: new BoxGeometry(0.035, 0.045, 0.05),
 };
+const RAD_RADIUS = 0.1;
+/** Warnblinker: vorn an den Ecken, hinten oben */
+const BLINKER: Array<[number, number, number]> = [
+  [0.722, 0.3, 0.215],
+  [0.722, 0.3, -0.215],
+  [-0.6, 0.62, 0.22],
+  [-0.6, 0.62, -0.22],
+];
+/** Ab dieser Geschwindigkeit (Szene-Einheiten je Sim-Minute) gilt das Fahrzeug als fahrend */
+const FAEHRT_AB = 4;
 const RAEDER: Array<[number, number]> = [
   [0.45, 0.24],
   [0.45, -0.24],
@@ -74,31 +87,73 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
   const grau = !ctx.tag.start[tour.id].besetzt;
   const zoomRef = useRef(1);
 
+  const raeder = useRef<Array<Group | null>>([]);
+  const blinker = useRef<Group>(null);
+  const lauf = useRef({ x: NaN, z: NaN, zeit: 0, bewegt: -Infinity, drehung: 0 });
+
   useFrame((_, dt) => {
     const g = gruppe.current;
     if (!g || !lage) return;
-    const p = lage.pose(tour.id, simUhr.zeit);
+    const zeit = simUhr.zeit;
+    const p = lage.pose(tour.id, zeit);
     const abstand = useAnsicht.getState().kameraAbstand;
     // in der Übersicht größer zeichnen, damit Fahrzeuge sichtbar bleiben (an der Basis nur leicht)
-    const zoom = Math.min(p.anRampe ? 1.4 : 9, Math.max(1, abstand / 45));
-    zoomRef.current = zoom;
+    let grenze = 9;
+    let x: number;
+    let z: number;
     let ziel: number;
+    let sofort = false;
     if (p.anRampe) {
-      g.position.set(rampe.x, 0, rampe.z);
+      x = rampe.x;
+      z = rampe.z;
       ziel = rampe.rot;
+      grenze = 1.4;
+      sofort = true;
+    } else if (p.uebergang) {
+      // weich von der Rampe über den Hof bzw. zurück (rückwärts an die Rampe)
+      const tor = { x: p.x * S, z: -p.y * S };
+      const u = p.uebergang.anteil;
+      const q = p.uebergang.art === 'abfahrt' ? abfahrtPose(rampe, tor, u) : ankunftPose(rampe, tor, u);
+      x = q.x;
+      z = q.z;
+      ziel = q.rot;
+      grenze = p.uebergang.art === 'abfahrt' ? 1.4 + 7.6 * u * u : 9 - 7.6 * Math.sqrt(u);
+      sofort = true;
     } else {
-      g.position.set(p.x * S, 0, -p.y * S);
+      x = p.x * S;
+      z = -p.y * S;
       ziel = p.richtung;
     }
+    const zoom = Math.min(grenze, Math.max(1, abstand / 45));
+    zoomRef.current = zoom;
+    g.position.set(x, 0, z);
     // sanft lenken statt an jeder Ecke springen
-    if (winkel.current === null || p.anRampe) winkel.current = ziel;
+    if (winkel.current === null || sofort) winkel.current = ziel;
     else {
       const d = Math.atan2(Math.sin(ziel - winkel.current), Math.cos(ziel - winkel.current));
       winkel.current += d * Math.min(1, dt * 8);
     }
     g.rotation.y = winkel.current;
     g.scale.setScalar(zoom);
-    setzeAnker(`fz:${tour.id}`, g.position.x, 1.0 * zoom, g.position.z);
+    setzeAnker(`fz:${tour.id}`, x, 1.0 * zoom, z);
+
+    // Räder drehen sich mit der gefahrenen Strecke; Warnblinker beim Halt
+    const l = lauf.current;
+    const dx = x - l.x;
+    const dz = z - l.z;
+    const weg = Math.hypot(dx, dz);
+    const dtSim = zeit - l.zeit;
+    if (Number.isFinite(weg) && weg < 30) {
+      const vorwaerts = dx * Math.cos(winkel.current) - dz * Math.sin(winkel.current) >= 0 ? 1 : -1;
+      l.drehung += (vorwaerts * weg) / (RAD_RADIUS * zoom);
+      for (const r of raeder.current) if (r) r.rotation.z = -l.drehung;
+    }
+    if (!Number.isFinite(weg) || weg >= 30 || (dtSim > 0 && weg / dtSim > FAEHRT_AB) || zeit < l.zeit) l.bewegt = zeit;
+    l.x = x;
+    l.z = z;
+    l.zeit = zeit;
+    const haelt = !p.anRampe && !p.uebergang && zeit - l.bewegt > 0.15;
+    if (blinker.current) blinker.current.visible = haelt && performance.now() % 800 < 430;
   });
 
   const umriss = gewaehlt || gehovert;
@@ -150,16 +205,39 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
       <mesh geometry={GEO.dach}>
         <meshLambertMaterial map={dachTextur} />
       </mesh>
-      {RAEDER.map(([x, z]) => (
-        <mesh key={`${x}${z}`} geometry={GEO.rad} position={[x, 0.1, z]}>
-          <meshLambertMaterial color="#262a30" />
-        </mesh>
+      {RAEDER.map(([x, z], i) => (
+        <group
+          key={`${x}${z}`}
+          position={[x, RAD_RADIUS, z]}
+          ref={(r) => {
+            raeder.current[i] = r;
+          }}
+        >
+          <mesh geometry={GEO.rad}>
+            <meshLambertMaterial color="#262a30" />
+          </mesh>
+          <mesh geometry={GEO.felge}>
+            <meshLambertMaterial color="#b9bec6" />
+          </mesh>
+        </group>
       ))}
       {[0.17, -0.17].map((z) => (
         <mesh key={z} geometry={GEO.licht} position={[0.725, 0.24, z]}>
           <meshBasicMaterial color="#fff6d8" />
         </mesh>
       ))}
+      {[0.19, -0.19].map((z) => (
+        <mesh key={`r${z}`} geometry={GEO.licht} position={[-0.6, 0.24, z]}>
+          <meshBasicMaterial color="#a8261d" />
+        </mesh>
+      ))}
+      <group ref={blinker} visible={false}>
+        {BLINKER.map(([x, y, z]) => (
+          <mesh key={`${x}${z}`} geometry={GEO.blinker} position={[x, y, z]}>
+            <meshBasicMaterial color="#ff9a1f" toneMapped={false} />
+          </mesh>
+        ))}
+      </group>
     </group>
   );
 }

@@ -40,6 +40,17 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
   const draufsicht = useAnsicht((s) => s.draufsicht);
   const welt = useLeitstand((s) => s.welt);
   const folgeVorher = useRef<{ x: number; z: number } | null>(null);
+  /** Abstand Blickziel – verfolgtes Fahrzeug zu Beginn einer Bedienung */
+  const folgeAbstand = useRef<{ x: number; z: number } | null>(null);
+
+  /** Position des verfolgten Fahrzeugs (nur unterwegs) */
+  const folgePunkt = (): { x: number; z: number } | null => {
+    const folgen = useAnsicht.getState().folgen;
+    const lage = useLeitstand.getState().lage;
+    if (!folgen || !lage) return null;
+    const p = lage.pose(folgen, simUhr.zeit);
+    return p.anRampe ? null : { x: p.x * S, z: -p.y * S };
+  };
 
   const starte = (ziel: Vector3, r: number, phi: number, theta: number, dauer = 1.3) => {
     const c = ref.current;
@@ -109,6 +120,8 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
         folgeVorher.current = { x, z };
       } else folgeVorher.current = null;
     } else folgeVorher.current = null;
+    // beim Verfolgen zum Blickziel hin zoomen, damit das Fahrzeug im Bild bleibt
+    if (c.zoomToCursor === Boolean(folgen)) c.zoomToCursor = !folgen;
     const a = anim.current;
     if (a) {
       const t = Math.min(1, (performance.now() - a.start) / a.dauer);
@@ -167,13 +180,26 @@ export function Kamera({ startZiel }: { startZiel: [number, number, number] }) {
       screenSpacePanning={false}
       onStart={() => {
         anim.current = null;
-        useAnsicht.getState().folgenSetzen(null);
+        // Zoomen und Drehen behalten die Verfolgung bei; ob verschoben wurde, zeigt sich am Ende
         const c = ref.current;
+        const p = folgePunkt();
+        folgeAbstand.current = p && c ? { x: c.target.x - p.x, z: c.target.z - p.z } : null;
         const oben = useAnsicht.getState().draufsicht;
         if (c) {
           c.maxPolarAngle = oben ? POLAR_OBEN : MAX_POLAR;
           c.enableRotate = !oben;
         }
+      }}
+      onEnd={() => {
+        const c = ref.current;
+        const p = folgePunkt();
+        const vorher = folgeAbstand.current;
+        folgeAbstand.current = null;
+        if (!c || !p || !vorher) return;
+        // verschoben: Verfolgung beenden
+        const drift = Math.hypot(c.target.x - p.x - vorher.x, c.target.z - p.z - vorher.z);
+        const d = camera.position.distanceTo(c.target);
+        if (drift > Math.max(2, d * 0.12)) useAnsicht.getState().folgenSetzen(null);
       }}
     />
   );

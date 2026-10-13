@@ -4,13 +4,14 @@ import { useAnsicht } from '../state/ansicht';
 import { useLeitstand } from '../state/store';
 import { Basis } from './Basis';
 import { Behaelter3D } from './Behaelter3D';
-import { Beschriftungen, Route } from './Beschriftungen';
+import { Beschriftungen } from './Beschriftungen';
 import { Fahrzeuge } from './Fahrzeuge';
 import { Gelaende } from './Gelaende';
 import { Haeuser } from './Haeuser';
 import { Kamera, startKamera } from './Kamera';
 import { LabelProjektor } from './LabelProjektor';
 import { LichtUndHimmel } from './LichtUndHimmel';
+import { Spuren } from './Spuren';
 import { Strassen } from './Strassen';
 
 /** Die 3D-Welt des Leitstands */
@@ -44,7 +45,7 @@ export function Szene() {
       <Behaelter3D welt={ctx.welt} tag={ctx.tag} plan={plan} />
       <Fahrzeuge ctx={ctx} />
       <Beschriftungen ctx={ctx} />
-      <Route ctx={ctx} />
+      <Spuren ctx={ctx} />
       <LabelProjektor />
     </Canvas>
   );

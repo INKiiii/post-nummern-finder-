@@ -15,7 +15,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | 1 | Setup, Datenmodell, Demo-Welt, Rechenmodell, Optimierer, Tests | fertig |
 | 2 | 3D-Szene statisch, Klick-Panels | fertig |
 | 3 | Datenquellen-Schicht: Scan-Ereignisse, Lagebild, Fahrergerät, Seite „Datenquellen“ | fertig |
-| 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | offen |
+| 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | fertig |
 | 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D) | offen |
 | 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | offen |
 | 7 | Szenarien | offen |
@@ -41,7 +41,7 @@ Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
 |---|---|---|
 | Verschieben | linke Maustaste ziehen | ein Finger |
 | Drehen/Neigen | rechte Maustaste ziehen | zwei Finger drehen/schieben |
-| Zoomen | Mausrad (zum Mauszeiger hin) | zwei Finger spreizen |
+| Zoomen | Mausrad (zum Mauszeiger hin; beim Verfolgen zum Fahrzeug) | zwei Finger spreizen |
 | Auswählen | Klick auf Fahrzeug, Behälter oder Haus | Tippen |
 
 * **3D / Draufsicht** schaltet die Ansicht um, **Basis zeigen** fliegt zu den Rampen.
@@ -52,6 +52,30 @@ Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
 * Die Dächer der Häuser zeigen die Farbe ihrer Tour (abschaltbar im Menü).
 * Auf dem Handy rechnet die Szene sparsamer (weniger Schatten und Bäume); im Menü umschaltbar.
 * Escape hebt die Auswahl auf, Strg+Z / Strg+Umschalt+Z = Rückgängig / Wiederholen.
+
+### Zeitsteuerung
+
+* ▶ / ❚❚ startet und hält die Simulationsuhr an, Tempo 1× · 5× · 15× · 60× · 240×.
+* Die Zeitleiste (07 … 18 Uhr) spult vor und zurück. Zurück heißt: Der Tag wird aus den
+  Ereignissen bis zu dieser Uhrzeit neu aufgebaut.
+* Tasten (Laptop): **Leertaste** Start/Pause, **← / →** 10 Minuten (mit Umschalt 1 Stunde),
+  **1–5** Tempo.
+* Ein angeklicktes Fahrzeug wird verfolgt. Zoomen und Drehen behalten die Verfolgung bei,
+  Verschieben beendet sie.
+
+### Animationen (alles aus dem Ereignisstrom)
+
+* **Beladen:** Nach dem Verladescan rollt der Behälter von seinem Platz durch die Rampentür ins
+  Fahrzeug (ohne Barcode-Etikett: nach dem ersten Ladescan seiner Pakete).
+* **Abfahrt und Rückkehr:** Nach `TOUR_START` fährt das Fahrzeug vorwärts über den Hof davon,
+  nach `TOUR_ENDE` wendet es im Hof und setzt rückwärts an die Rampe.
+* **Unterwegs:** Die Räder drehen sich mit der gefahrenen Strecke; steht das Fahrzeug an einem
+  Stopp, blinkt die Warnblinkanlage. Das Label zeigt die Restzeit.
+* **Spuren:** Die schon gefahrene Strecke liegt durchgezogen in Tourfarbe auf der Straße, der
+  Rest der Route gestrichelt. Die ausgewählte Tour wird betont, die anderen treten zurück.
+* **Häuser leuchten** kurz gelb auf, wenn dort ein Paket zugestellt wurde, orange bei „nicht
+  zugestellt“, zeitgleich mit dem angezeigten Fahrzeug.
+* **Licht** folgt der Simulationsuhr (Sonnenstand, Farbe des Himmels).
 
 ## Aufbau
 
@@ -78,7 +102,7 @@ src/
   worker/           Optimierung im Web Worker
   state/            Zustand (zustand): Plan, Annahmen, Verlauf; Auswahl und Kamera
   szene/            3D-Szene (three.js über @react-three/fiber): Gelände, Straßen,
-                    Häuser und Behälter per Instancing, Basis, Fahrzeuge, Kamera, Licht
+                    Häuser und Behälter per Instancing, Basis, Fahrzeuge, Spuren, Kamera, Licht
   geraet/           Übertragung zum Fahrergerät (BroadcastChannel)
   ui/               Oberfläche: Leitstand, Panels, Ereignisstrom, Datenquellen,
                     Geräte-Ansicht (fahrer/), Beschriftungen, Prüfansicht
@@ -131,6 +155,17 @@ Der Leitstand nutzt nur Daten, die bei der Arbeit ohnehin entstehen. Alles, was 
    Fahrzeug-Panel „Bitte melden“ senden → auf dem Gerät „Verstanden“ → im Leitstand steht
    „verstanden 10:03“.
 5. Menü → „Datenquellen“; dort lässt sich das Barcode-Etikett am Behälter ab- und anschalten.
+
+### So testest du Phase 4
+
+1. `npm run dev`, „Basis zeigen“, Zeitleiste auf etwa 07:10, Tempo 5×, ▶ (oder Leertaste).
+   Die Behälter rollen nacheinander durch die Rampentüren in die Fahrzeuge.
+2. Gegen 07:30 fahren die Fahrzeuge vorwärts über den Hof los.
+3. Tempo 60×, Menü → „Ganze Karte“: hinter jedem Fahrzeug wächst eine Spur in Tourfarbe,
+   der Rest der Route ist gestrichelt.
+4. Eine Tour anklicken: Die Kamera folgt. Mit dem Mausrad heranzoomen (die Verfolgung bleibt):
+   Häuser leuchten bei Zustellungen auf, beim Halt blinkt die Warnblinkanlage.
+5. ← / → springen 10 Minuten; nachmittags setzen die Fahrzeuge rückwärts an die Rampe.
 
 ## Rechenmodell
 

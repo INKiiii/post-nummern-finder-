@@ -16,6 +16,7 @@ import { BezirkPanel } from './panels/BezirkPanel';
 import { FahrzeugPanel } from './panels/FahrzeugPanel';
 import { Balken } from './panels/Gemeinsam';
 import { WertKnopf } from './Rechenweg';
+import { useZeitTasten } from './takt';
 import { Zeitleiste } from './Zeitleiste';
 
 const SCHMAL = '(max-width: 819px)';
@@ -48,6 +49,7 @@ export function Leitstand() {
   const [menue, setMenue] = useState(false);
   const [blattOffen, setBlattOffen] = useState(true);
   const [blattTab, setBlattTab] = useState<'touren' | 'ereignisse'>('touren');
+  useZeitTasten();
   const [ereignisse, setEreignisseRoh] = useState(ereignisseAnfangs);
   const setEreignisse = (an: boolean) => {
     setEreignisseRoh(an);
@@ -62,10 +64,6 @@ export function Leitstand() {
     const taste = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (e.key === 'Escape') useAnsicht.getState().waehlen(null);
-      if (e.key === ' ') {
-        e.preventDefault();
-        useLeitstand.getState().startPause();
-      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) useLeitstand.getState().wiederholen();

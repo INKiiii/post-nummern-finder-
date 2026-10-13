@@ -54,3 +54,12 @@ export function behaelterPosition(welt: Welt, tag: Tag, plan: Plan, id: string):
 export function basisPosition(welt: Welt): { x: number; z: number } {
   return halleMitte(welt);
 }
+
+/** Tour, zu der die Auswahl gehört (Fahrzeug, Behälter oder Bezirk), sonst null */
+export function tourDerAuswahl(a: Auswahl, tag: Tag, plan: Plan): string | null {
+  if (!a) return null;
+  if (a.art === 'fahrzeug') return a.id;
+  const behaelter = a.art === 'behaelter' ? a.id : a.art === 'bezirk' ? tag.behaelterIds.find((b) => tag.behaelter[b].zielbezirk === a.id) : undefined;
+  if (!behaelter) return null;
+  return tag.touren.find((t) => behaelterFolge(plan, t.id).includes(behaelter))?.id ?? null;
+}

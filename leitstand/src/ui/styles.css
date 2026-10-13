@@ -1131,10 +1131,51 @@ dl.glossar dd {
   gap: 8px;
 }
 
-.zeitleiste .regler {
+.zeitleiste .regler-huelle {
+  position: relative;
   flex: 1 1 auto;
   min-width: 120px;
+  padding-bottom: 11px;
+}
+
+.zeitleiste .regler {
+  display: block;
+  width: 100%;
+  margin: 0;
   accent-color: var(--akzent);
+}
+
+.regler-marken span {
+  position: absolute;
+  bottom: -1px;
+  transform: translateX(-50%);
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--textLeise);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.regler-marken span::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  width: 1px;
+  height: 3px;
+  background: var(--rand);
+}
+
+@media (max-width: 1366px) {
+  .ls-uhr .zeitleiste .regler-huelle {
+    min-width: 90px;
+  }
+  .ls-uhr .zeitleiste .umschalter.klein button {
+    padding: 4px 6px;
+  }
+  .ls-uhr .neu-text {
+    display: none;
+  }
 }
 
 .zeitleiste .uhr-klein {
@@ -1144,12 +1185,12 @@ dl.glossar dd {
 }
 
 .ls-uhr {
+  --uhr-breite: clamp(472px, calc(100% - 840px), 640px);
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  /* mittig, aber nie über dem Ereignis-Panel links */
+  left: max(420px, calc(50% - var(--uhr-breite) / 2));
   bottom: calc(10px + env(safe-area-inset-bottom));
-  width: min(640px, calc(100% - 720px));
-  min-width: 420px;
+  width: var(--uhr-breite);
   padding: 6px 10px;
   border-radius: var(--radius);
   z-index: 6;
@@ -1332,16 +1373,18 @@ a.link {
 @media (max-width: 819px) {
   .blatt-uhr {
     padding: 0 10px 6px;
+    flex-shrink: 0;
   }
   .blatt-uhr .zeitleiste {
     gap: 6px;
   }
-  .blatt-uhr .regler {
+  .blatt-uhr .regler-huelle {
     min-width: 60px;
   }
   .blatt-tabs {
     margin: 0 12px 8px;
     display: flex;
+    flex-shrink: 0;
   }
   .blatt-tabs button {
     flex: 1;

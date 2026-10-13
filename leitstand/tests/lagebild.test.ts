@@ -148,3 +148,43 @@ describe('Lagebild aus dem Ereignisstrom', () => {
     for (const b of f) expect(lage.behaelter(b).status).toBe('zugestellt');
   });
 });
+
+describe('Lagebild für die Animation', () => {
+  it('Abfahrt und Rückkehr gleiten zwischen Rampe und Route', () => {
+    const { lage, bis } = tag();
+    bis(7 * 60 + 29);
+    expect(lage.pose('T1', 7 * 60 + 29).anRampe).toBe(true);
+    bis(9 * 60);
+    const start = lage.fahrzeug('T1').tourStart!;
+    const p = lage.pose('T1', start + 0.5);
+    expect(p.anRampe).toBe(false);
+    expect(p.uebergang?.art).toBe('abfahrt');
+    expect(p.uebergang!.anteil).toBeCloseTo(0.5, 6);
+    bis(22 * 60);
+    const ende = lage.fahrzeug('T1').tourEnde!;
+    expect(lage.pose('T1', ende + 1.5).uebergang?.art).toBe('ankunft');
+    expect(lage.pose('T1', ende + 2.5).anRampe).toBe(true);
+    expect(lage.anzeigeS('T1', ende + 3)).toBeCloseTo(lage.fahrzeug('T1').route.laenge, 6);
+  });
+
+  it('Zustellscans stehen mit Zeit und Stopp für das Leuchten der Häuser bereit', () => {
+    const { lage, bis, ctx } = tag();
+    bis(12 * 60);
+    expect(lage.zustellungen.length).toBe((lage.zaehler.ZUSTELLUNG ?? 0) + (lage.zaehler.NICHT_ZUGESTELLT ?? 0));
+    for (let i = 1; i < lage.zustellungen.length; i++) expect(lage.zustellungen[i].t).toBeGreaterThanOrEqual(lage.zustellungen[i - 1].t);
+    for (const z of lage.zustellungen.slice(0, 50)) expect(ctx.welt.stopps[z.stoppId]).toBeDefined();
+    expect(lage.zustellungen.some((z) => !z.ok)).toBe(true);
+  });
+
+  it('angezeigte Strecke wächst monoton', () => {
+    const { lage, bis } = tag();
+    let vorher = 0;
+    for (let t = 7 * 60 + 30; t <= 16 * 60; t += 2) {
+      bis(t);
+      const s = lage.anzeigeS('T3', t);
+      expect(s).toBeGreaterThanOrEqual(vorher - 1e-9);
+      vorher = s;
+    }
+    expect(vorher).toBeGreaterThan(20);
+  });
+});

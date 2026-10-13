@@ -42,7 +42,9 @@ export const THEME = {
     bereitstell: '#d7dde4',
     haus: ['#efe6da', '#f2ece4', '#e6ded3', '#f4efe8', '#e9e1d6'],
     dach: ['#b9674f', '#9c5a48', '#8a8f99', '#a8735a', '#7d6a5e'],
-    leuchten: '#fff3b0',
+    /** Haus leuchtet kurz bei einer Zustellung, orange bei „nicht zugestellt“ */
+    leuchten: '#ffcf33',
+    leuchtenNicht: '#f0772a',
     sperrung: '#d63c3c',
   },
 } as const;
