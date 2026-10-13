@@ -343,6 +343,10 @@ button.chip:hover {
   }
 }
 
+.ls-rechts .deltas {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .delta {
   background: var(--hintergrund);
   border-radius: 6px;
@@ -969,6 +973,31 @@ ol.route .uhr {
   transform: scale(1.12);
 }
 
+.label-delta {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--warnung);
+}
+
+.label-delta.gut {
+  background: var(--gut);
+  color: #fff;
+}
+
+.label-delta.schlecht {
+  background: var(--schlecht);
+  color: #fff;
+}
+
+.szene-label.treff.vorschau {
+  background: var(--akzent);
+  color: var(--akzentText);
+  font-size: 12px;
+}
+
 /* Info-Dialog */
 
 .dialog.breit {
@@ -1388,6 +1417,17 @@ a.link {
   }
   .blatt-tabs button {
     flex: 1;
+    white-space: nowrap;
+    padding-inline: 6px;
+  }
+  /* Vorschau im Blatt: Übernehmen/Verwerfen bleiben sichtbar */
+  .blatt-inhalt .vorschau-fuss {
+    position: sticky;
+    bottom: -12px;
+    margin: 6px -12px -12px;
+    padding: 8px 12px 12px;
+    background: var(--flaeche);
+    border-top: 1px solid var(--rand);
   }
   .blatt-inhalt .ereignis-panel {
     height: 32vh;
@@ -1778,5 +1818,231 @@ table.quellen td.nichts {
   to {
     transform: none;
     opacity: 1;
+  }
+}
+
+/* ---- Umplanen: Vorschläge, Vorschau, Optionen ------------------------------------- */
+
+.knopf-reihe {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.zaehler {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--akzent);
+  color: var(--akzentText);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.knopf.an .zaehler,
+.umschalter button.an .zaehler {
+  background: var(--akzentText);
+  color: var(--akzent);
+}
+
+.ls-vorschau {
+  --uhr-breite: clamp(472px, calc(100% - 840px), 640px);
+  position: absolute;
+  left: max(420px, calc(50% - var(--uhr-breite) / 2));
+  width: var(--uhr-breite);
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  max-height: calc(100% - 170px);
+  overflow: auto;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  z-index: 7;
+  border-color: color-mix(in srgb, var(--akzent) 45%, white);
+}
+
+.vorschau-karte .art {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--akzent);
+  font-weight: 700;
+}
+
+.vorschau-kopf {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vorschau-kopf h3 {
+  margin: 2px 0 0;
+  font-size: 16px;
+}
+
+.vorschau-text {
+  margin: 6px 0;
+  font-size: 14px;
+}
+
+.uebergabe-zeile {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 6px 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--akzent) 7%, transparent);
+  font-size: 13px;
+}
+
+.treff-symbol {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 3px solid var(--akzent);
+  background: white;
+}
+
+.vorschau-touren {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 8px;
+}
+
+.vorschau-tour {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.vorschau-tour .farbe,
+.option .farbe {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--tourfarbe);
+}
+
+.vorschau-fuss {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.umschalter.voll {
+  display: flex;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.umschalter.voll button {
+  flex: 1;
+}
+
+.optionen {
+  display: grid;
+  gap: 4px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  background: var(--flaeche);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.option:hover:not(:disabled) {
+  border-color: var(--tourfarbe);
+  box-shadow: inset 3px 0 0 var(--tourfarbe);
+}
+
+.option:disabled {
+  cursor: default;
+  background: var(--hintergrund);
+}
+
+.option.knapp {
+  opacity: 0.72;
+}
+
+.option .mitte {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.option .zahlen {
+  flex: none;
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.chip.gewaehlt {
+  background: var(--akzent);
+  border-color: var(--akzent);
+  color: var(--akzentText);
+}
+
+.hinweis-leiste {
+  position: absolute;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: fit-content;
+  top: calc(84px + env(safe-area-inset-top));
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100% - 32px));
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: #1f2a3a;
+  color: #fff;
+  font-size: 14px;
+  box-shadow: var(--schatten);
+  animation: hinweis-ein 0.18s ease-out;
+}
+
+.hinweis-leiste .knopf {
+  flex: none;
+  color: var(--text);
+}
+
+@keyframes hinweis-ein {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (max-width: 819px) {
+  /* Handy: über dem eingeklappten Blatt, damit die Szene frei bleibt */
+  .hinweis-leiste {
+    top: auto;
+    bottom: calc(112px + env(safe-area-inset-bottom));
+    font-size: 13px;
   }
 }

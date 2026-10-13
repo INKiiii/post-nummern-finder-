@@ -147,6 +147,9 @@ export function Datenquellen() {
               <b>Abgeleitet:</b> Position der {G.rollbehaelter} = Position des {G.fahrzeug}s, in das sie verladen wurden (Behälter haben keinen eigenen Tracker).
             </li>
             <li>
+              <b>Übergaben am {G.treffpunkt}:</b> erkannt am Ladescan im übernehmenden {G.fahrzeug} – dafür gibt es kein eigenes Ereignis.
+            </li>
+            <li>
               <b>Geschätzt:</b> Fortschritt bei {G.briefe}n und {G.zeitungen} aus Position und {G.gangfolge}; Restzeiten und Rückkehr aus dem Plan und dem bisher beobachteten Tempo.
             </li>
           </ul>

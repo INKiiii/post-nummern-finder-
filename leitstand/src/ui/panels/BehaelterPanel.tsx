@@ -5,6 +5,7 @@ import { tourName } from '../../core/vorschlaege';
 import { useAnsicht } from '../../state/ansicht';
 import { useLeitstand } from '../../state/store';
 import { waehleUndZeige } from '../aktionen';
+import { BehaelterUmplanen } from '../umplanen/Umplanen';
 import { AusScans, Balken, Geschaetzt, PanelKopf, STATUS_TEXT, Zeile } from './Gemeinsam';
 
 export function BehaelterPanel({ id }: { id: string }) {
@@ -64,6 +65,7 @@ export function BehaelterPanel({ id }: { id: string }) {
           {G.behaelterPlural} haben keinen eigenen Tracker. Ihre Position ist die des {G.fahrzeug}s, in das sie verladen wurden.
         </p>
       </div>
+      <BehaelterUmplanen id={id} />
       <div className="panel-abschnitt">
         <h3>Zustellung im Bezirk</h3>
         <Zeile was={G.pakete}>

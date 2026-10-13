@@ -10,6 +10,7 @@ import { fmtDauer, fmtKm, fmtUhr } from './format';
 import { behaelterFolge, bewertePlan, vergleiche, type Delta, type Kontext, type PlanAuswertung } from './modell';
 import { Loesung, Problem, einfuegen, loesungZuPlan, optimiere } from './optimierer';
 import type { Plan } from './types';
+import { anBordVon, neueUebergaben, tauschUebergaben, tourMitBehaelter, uebergabeZiele, type UebergabeErgebnis, type UebergabeInfo } from './uebergabe';
 
 export type VorschlagArt = 'tourEinsparen' | 'ueberlastung' | 'umlegen' | 'reihenfolge' | 'ausfall' | 'gesamt';
 
@@ -45,6 +46,8 @@ export interface Vorschlag {
   wiederkehrend: boolean;
   /** z. B. „Überstunden drohen bei Tour 2 (+25 Min)“ */
   warnung?: string;
+  /** neue Übergaben am Treffpunkt (nur im laufenden Tag) */
+  uebergaben: UebergabeInfo[];
 }
 
 /** Was hat sich zwischen zwei Plänen geändert? */
@@ -124,6 +127,7 @@ function baue(
     reihenfolge: diff.reihenfolge,
     wiederkehrend,
     warnung: ueberstundenWarnung(ctx, neu, delta.betroffen),
+    uebergaben: neueUebergaben(ctx, planAlt, planNeu, neu),
   };
 }
 
@@ -243,6 +247,40 @@ export function erzeugeVorschlaege(ctx: Kontext, plan: Plan, opt: VorschlagOptio
       wiederkehrend,
     );
     if (v && v.delta.ueberstundenMin < -0.5) liste.push(v);
+  }
+
+  // Überlastung abbauen per Übergabe (unterwegs, wenn kein Fahrzeug mehr an der Rampe helfen kann)
+  if (alt.gueltig && alt.summe.ueberstundenMin > 0.5 && !liste.some((v) => v.art === 'ueberlastung')) {
+    const ueberlastet = alt.tourIds.filter((id) => alt.touren[id].ueberstundenMin > 0.5 && !ctx.tag.start[id].mussLaden);
+    let best: { u: UebergabeErgebnis; o: string } | null = null;
+    for (const o of ueberlastet) {
+      for (const x of ctx.tag.start[o].geladen) {
+        if (!behaelterFolge(plan, o).includes(x)) continue;
+        for (const u of uebergabeZiele(ctx, plan, x, alt)) {
+          const n = u.info.nach;
+          if (u.auswertung.touren[n].ueberstundenMin > alt.touren[n].ueberstundenMin + 0.5) continue;
+          if (u.delta.ueberstundenMin >= -0.5) continue;
+          if (!best || u.delta.euroTag > best.u.delta.euroTag + 1e-6) best = { u, o };
+        }
+      }
+    }
+    if (best) {
+      const { u, o } = best;
+      const v = baue(
+        ctx,
+        'ueberlastung',
+        plan,
+        alt,
+        u.plan,
+        `Überlastung ${tourName(ctx, o)} abbauen`,
+        (n) =>
+          `${G.behaelter} ${u.info.abgeben.join(', ')}: ${tourName(ctx, u.info.von)} → ${tourName(ctx, u.info.nach)}, ` +
+          `Übergabe ${fmtUhr(u.info.zeit)} am ${G.treffpunkt} ${u.info.treffpunkt.name}. ` +
+          `${tourName(ctx, o)} endet ${fmtUhr(n.touren[o].ende)} statt ${fmtUhr(alt.touren[o].ende)}.`,
+        false,
+      );
+      if (v) liste.push(v);
+    }
   }
 
   // Behälter umlegen: bester einzelner Zug, der Kosten spart (ohne Tour aufzulösen)
@@ -472,4 +510,102 @@ export function verteileOffene(ctx: Kontext, plan: Plan, liegenErlaubt = false):
   const offen = ctx.tag.behaelterIds.filter((b) => p.beweglich.has(b) && !l.tourVon(b));
   einfuegen(l, offen, liegenErlaubt);
   return loesungZuPlan(l, plan);
+}
+
+// ---------------------------------------------------------------------------------------
+// Umplanen eines Behälters: andere Tour (aus der Halle oder per Übergabe) und Tauschen
+// ---------------------------------------------------------------------------------------
+
+export interface UmplanOption extends TourOption {
+  /** null: Behälter steht in der Halle und wird einfach anders verladen */
+  uebergabe: UebergabeInfo | null;
+}
+
+/** „Andere Tour“ für einen Behälter, egal ob in der Halle oder schon an Bord */
+export function umplanOptionen(ctx: Kontext, plan: Plan, behaelterId: string): UmplanOption[] {
+  const p = new Problem(ctx, plan);
+  if (p.beweglich.has(behaelterId)) return optionenFuerBehaelter(ctx, plan, behaelterId).map((o) => ({ ...o, uebergabe: null }));
+  const von = tourMitBehaelter(plan, behaelterId);
+  if (!von || anBordVon(ctx, behaelterId) !== von) return [];
+  const alt = bewertePlan(ctx, plan);
+  const optionen: UmplanOption[] = [
+    {
+      tourId: von,
+      aktuell: true,
+      plan,
+      auswertung: alt,
+      delta: vergleiche(alt, alt, ctx.annahmen),
+      dauerDanach: alt.touren[von].dauer,
+      endeDanach: alt.touren[von].ende,
+      ueberstundenDanach: alt.touren[von].ueberstundenMin,
+      machbar: true,
+      beste: false,
+      uebergabe: null,
+    },
+  ];
+  for (const u of uebergabeZiele(ctx, plan, behaelterId, alt)) {
+    const z = u.auswertung.touren[u.info.nach];
+    optionen.push({
+      tourId: u.info.nach,
+      aktuell: false,
+      plan: u.plan,
+      auswertung: u.auswertung,
+      delta: u.delta,
+      dauerDanach: z.dauer,
+      endeDanach: z.ende,
+      ueberstundenDanach: z.ueberstundenMin,
+      machbar: z.ueberstundenMin <= alt.touren[u.info.nach].ueberstundenMin + 0.5,
+      beste: false,
+      uebergabe: u.info,
+    });
+  }
+  let beste: UmplanOption | null = null;
+  for (const o of optionen) if (o.machbar && (!beste || o.delta.euroTag > beste.delta.euroTag + 1e-6)) beste = o;
+  if (beste) beste.beste = true;
+  return optionen;
+}
+
+export interface TauschOption {
+  tourId: string;
+  /** Behälter der anderen Tour */
+  partner: string;
+  plan: Plan;
+  auswertung: PlanAuswertung;
+  delta: Delta;
+  uebergabe: UebergabeInfo | null;
+  /** keine neuen Überstunden */
+  machbar: boolean;
+}
+
+/** „Gebiet tauschen“: Behälter gegen einen Behälter einer anderen Tour, beste zuerst */
+export function tauschOptionen(ctx: Kontext, plan: Plan, behaelterId: string): TauschOption[] {
+  const p = new Problem(ctx, plan);
+  const alt = bewertePlan(ctx, plan);
+  const machbar = (aus: PlanAuswertung) => aus.gueltig && alt.tourIds.every((id) => aus.touren[id].ueberstundenMin <= alt.touren[id].ueberstundenMin + 0.5);
+  const erg: TauschOption[] = [];
+  const von = tourMitBehaelter(plan, behaelterId);
+  if (!von) return [];
+  if (p.beweglich.has(behaelterId) && p.ziele.has(von)) {
+    // beide noch in der Halle: einfach tauschen und die Reihenfolge neu ordnen
+    const fa = behaelterFolge(plan, von);
+    for (const t of p.tourIds) {
+      if (t === von || !p.ziele.has(t)) continue;
+      for (const y of behaelterFolge(plan, t)) {
+        if (!p.beweglich.has(y)) continue;
+        const neu: Plan = structuredClone(plan);
+        const na = p.ordne(von, fa.map((b) => (b === behaelterId ? y : b)));
+        const nb = p.ordne(t, behaelterFolge(plan, t).map((b) => (b === y ? behaelterId : b)));
+        neu.touren[von] = { schritte: na.map((b) => ({ art: 'bezirk' as const, behaelterId: b })) };
+        neu.touren[t] = { schritte: nb.map((b) => ({ art: 'bezirk' as const, behaelterId: b })) };
+        const aus = bewertePlan(ctx, neu);
+        if (!aus.gueltig) continue;
+        erg.push({ tourId: t, partner: y, plan: neu, auswertung: aus, delta: vergleiche(alt, aus, ctx.annahmen), uebergabe: null, machbar: machbar(aus) });
+      }
+    }
+  } else if (anBordVon(ctx, behaelterId) === von) {
+    for (const u of tauschUebergaben(ctx, plan, behaelterId, alt)) {
+      erg.push({ tourId: u.info.nach, partner: u.info.aufnehmen[0], plan: u.plan, auswertung: u.auswertung, delta: u.delta, uebergabe: u.info, machbar: machbar(u.auswertung) });
+    }
+  }
+  return erg.sort((x, y) => Number(y.machbar) - Number(x.machbar) || y.delta.euroTag - x.delta.euroTag);
 }

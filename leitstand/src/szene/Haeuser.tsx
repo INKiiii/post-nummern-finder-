@@ -92,13 +92,18 @@ export function Haeuser({ welt, tag, plan }: { welt: Welt; tag: Tag; plan: Plan 
     }
   }, [welt, formen]);
 
-  // Farben: Dächer in Tourfarbe, ausgewählte Bezirke hervorgehoben
+  // Farben: Dächer in Tourfarbe (in der Vorschau schon nach dem neuen Plan), ausgewählte Bezirke hervorgehoben
+  const vorschau = useLeitstand((s) => s.vorschau);
+  const farbPlan = vorschau?.tagesplan ?? plan;
   const tourJeBezirk = useMemo(() => {
     const m = new Map<string, string>();
-    for (const t of tag.touren) for (const b of behaelterFolge(plan, t.id)) m.set(tag.behaelter[b].zielbezirk, t.farbe);
+    for (const t of tag.touren) for (const b of behaelterFolge(farbPlan, t.id)) m.set(tag.behaelter[b].zielbezirk, t.farbe);
     return m;
-  }, [tag, plan]);
-  const aktiv = useMemo(() => aktiveBezirke(auswahl, tag, plan), [auswahl, tag, plan]);
+  }, [tag, farbPlan]);
+  const aktiv = useMemo(() => {
+    if (vorschau && vorschau.aenderungen.length) return new Set(vorschau.aenderungen.map((a) => tag.behaelter[a.behaelterId].zielbezirk));
+    return aktiveBezirke(auswahl, tag, plan);
+  }, [auswahl, tag, plan, vorschau]);
 
   useLayoutEffect(() => {
     const c = new Color();

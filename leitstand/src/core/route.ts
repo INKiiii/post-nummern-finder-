@@ -9,9 +9,16 @@
  */
 import { G } from '../glossar';
 import type { Kontext, PlanAuswertung } from './modell';
-import type { KnotenId, Vec2 } from './types';
+import type { KnotenId, Schritt, Vec2 } from './types';
 
-export type RoutenSchritt = { art: 'bezirk'; behaelterId: string } | { art: 'treffpunkt'; knoten: KnotenId; name: string };
+export type RoutenSchritt = { art: 'bezirk'; behaelterId: string } | { art: 'treffpunkt'; knoten: KnotenId; name: string; uebergabeId?: string };
+
+/** Planschritte → Routenschritte (Übergaben werden zu Treffpunkten) */
+export function routenSchritte(schritte: readonly Schritt[]): RoutenSchritt[] {
+  return schritte.map((x) =>
+    x.art === 'bezirk' ? { art: 'bezirk', behaelterId: x.behaelterId } : { art: 'treffpunkt', knoten: x.treffpunkt, name: x.treffpunktName, uebergabeId: x.id },
+  );
+}
 
 export interface RoutenTeil {
   art: 'fahrt' | 'bezirk' | 'treffpunkt';
@@ -23,6 +30,8 @@ export interface RoutenTeil {
   behaelterId?: string;
   /** Index des Schritts im Plan (für Bezirk und Treffpunkt) */
   schritt?: number;
+  /** Übergabe am Treffpunkt */
+  uebergabeId?: string;
 }
 
 export interface RoutenStopp {
@@ -105,7 +114,7 @@ export function baueRoute(ctx: Kontext, start: KnotenId, schritte: RoutenSchritt
       b.r.teile.push({ art: 'bezirk', s0, s1: b.s, name: bz.name, bezirkId: bz.id, behaelterId: sch.behaelterId, schritt: schrittIndexStart + i });
     } else {
       b.fahrt(sch.knoten, `${G.treffpunkt} ${sch.name}`);
-      b.r.teile.push({ art: 'treffpunkt', s0: b.s, s1: b.s, name: `${G.treffpunkt} ${sch.name}`, schritt: schrittIndexStart + i });
+      b.r.teile.push({ art: 'treffpunkt', s0: b.s, s1: b.s, name: `${G.treffpunkt} ${sch.name}`, schritt: schrittIndexStart + i, uebergabeId: sch.uebergabeId });
     }
   });
   if (zurBasis) b.fahrt(welt.basis.knoten, G.zustellbasis);
@@ -117,10 +126,7 @@ export function baueRoute(ctx: Kontext, start: KnotenId, schritte: RoutenSchritt
 export function routeAusAuswertung(ctx: Kontext, aus: PlanAuswertung, tourId: string): Route {
   const t = aus.touren[tourId];
   const start = ctx.tag.start[tourId];
-  const schritte: RoutenSchritt[] = t.schritte.map((x) =>
-    x.schritt.art === 'bezirk' ? { art: 'bezirk', behaelterId: x.schritt.behaelterId } : { art: 'treffpunkt', knoten: x.schritt.treffpunkt, name: x.schritt.treffpunktName },
-  );
-  return baueRoute(ctx, start.knoten, schritte, !start.defekt && t.aktiv);
+  return baueRoute(ctx, start.knoten, routenSchritte(t.schritte.map((x) => x.schritt)), !start.defekt && t.aktiv);
 }
 
 /** Knotenfolge der ganzen Tour (für Linien in Karte und Szene) */
@@ -310,4 +316,80 @@ export function verketteZeitplan(alt: Zeitplan, bisS: number, bisT: number, neu:
     t.push(neu.t[j]);
   }
   return { s, t };
+}
+
+// ---------------------------------------------------------------------------------------
+// Übergaben: beide Fahrzeuge warten am Treffpunkt aufeinander
+// ---------------------------------------------------------------------------------------
+
+/** Wartezeit w an der Stelle s einfügen (alles danach verschiebt sich) */
+export function wartenEinfuegen(zp: Zeitplan, s: number, w: number): Zeitplan {
+  if (w <= 1e-9) return zp;
+  let k = zp.s.findIndex((x) => x >= s - 1e-9);
+  if (k < 0) k = zp.s.length - 1;
+  const neuS = [...zp.s.slice(0, k + 1), zp.s[k], ...zp.s.slice(k + 1)];
+  const neuT = [...zp.t.slice(0, k + 1), zp.t[k] + w, ...zp.t.slice(k + 1).map((t) => t + w)];
+  return { s: neuS, t: neuT };
+}
+
+export interface AbgleichEintrag {
+  route: Route;
+  /** Zeitplan ohne Wartezeiten an den Treffpunkten */
+  zp: Zeitplan;
+  /** erst ab dieser Strecke gelten Treffpunkte (vorher schon vorbei) */
+  abS?: number;
+}
+
+/**
+ * Zeitpläne so anpassen, dass sich die Partner einer Übergabe treffen: Wer zuerst am
+ * Treffpunkt ist, wartet. Liefert die angepassten Zeitpläne und die Treffzeiten.
+ */
+export function uebergabenAbgleichen(eintraege: Map<string, AbgleichEintrag>, erledigt: ReadonlySet<string> = new Set()): {
+  zeitplaene: Map<string, Zeitplan>;
+  treffen: Map<string, number>;
+} {
+  // Treffpunkte je Übergabe
+  const orte = new Map<string, Array<{ tour: string; s: number }>>();
+  for (const [tour, e] of eintraege) {
+    for (const t of e.route.teile) {
+      if (t.art !== 'treffpunkt' || !t.uebergabeId || erledigt.has(t.uebergabeId) || t.s0 < (e.abS ?? 0) - 1e-9) continue;
+      const l = orte.get(t.uebergabeId) ?? [];
+      l.push({ tour, s: t.s0 });
+      orte.set(t.uebergabeId, l);
+    }
+  }
+  const warten = new Map<string, Map<number, number>>(); // tour → (s → Minuten)
+  const mitWarten = (tour: string): Zeitplan => {
+    let zp = eintraege.get(tour)!.zp;
+    const w = warten.get(tour);
+    if (!w) return zp;
+    // von hinten einfügen, damit die Stellen davor unverändert bleiben
+    for (const [s, m] of [...w.entries()].sort((a, b) => b[0] - a[0])) zp = wartenEinfuegen(zp, s, m);
+    return zp;
+  };
+  const treffen = new Map<string, number>();
+  for (let runde = 0; runde < 6; runde++) {
+    let geaendert = false;
+    for (const [id, l] of orte) {
+      if (l.length !== 2) continue;
+      const ank = l.map((x) => zeitBeiS(mitWarten(x.tour), x.s).ankunft);
+      const t = Math.max(...ank);
+      treffen.set(id, t);
+      l.forEach((x, i) => {
+        let w = warten.get(x.tour);
+        if (!w) warten.set(x.tour, (w = new Map()));
+        const alt = w.get(x.s) ?? 0;
+        // Ankunft enthält nur die Wartezeiten davor; gewartet wird bis zum Treffen
+        const neu = Math.max(0, t - ank[i]);
+        if (Math.abs(neu - alt) > 1e-6) {
+          w.set(x.s, neu);
+          geaendert = true;
+        }
+      });
+    }
+    if (!geaendert) break;
+  }
+  const zeitplaene = new Map<string, Zeitplan>();
+  for (const tour of eintraege.keys()) zeitplaene.set(tour, mitWarten(tour));
+  return { zeitplaene, treffen };
 }

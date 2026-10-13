@@ -42,6 +42,12 @@ interface AnsichtZustand {
   tipp: string | null;
   /** Kamera folgt diesem Fahrzeug (Tour-ID) */
   folgen: string | null;
+  /** Handy: das nächste angetippte Fahrzeug übernimmt diesen Behälter */
+  zielWahl: { behaelterId: string } | null;
+  /** Laptop: dieser Behälter wird gerade auf ein Fahrzeug gezogen (Ziel unter dem Mauszeiger) */
+  ziehen: { behaelterId: string; ziel: Auswahl } | null;
+  /** kurze Meldung unten in der Mitte */
+  hinweis: { text: string; nr: number } | null;
 
   waehlen: (a: Auswahl) => void;
   hovern: (a: Auswahl) => void;
@@ -52,9 +58,13 @@ interface AnsichtZustand {
   kameraAbstandSetzen: (d: number) => void;
   tippSetzen: (t: string | null) => void;
   folgenSetzen: (tourId: string | null) => void;
+  zielWahlSetzen: (z: { behaelterId: string } | null) => void;
+  ziehenSetzen: (z: { behaelterId: string; ziel: Auswahl } | null) => void;
+  hinweisSetzen: (text: string | null) => void;
 }
 
 let flugNr = 0;
+let hinweisNr = 0;
 
 export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   auswahl: null,
@@ -66,6 +76,9 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
   kameraAbstand: 1200,
   tipp: null,
   folgen: null,
+  zielWahl: null,
+  ziehen: null,
+  hinweis: null,
 
   waehlen: (auswahl) => set({ auswahl, folgen: auswahl?.art === 'fahrzeug' && auswahl.id === get().folgen ? get().folgen : null }),
   hovern: (hover) => {
@@ -83,6 +96,13 @@ export const useAnsicht = create<AnsichtZustand>((set, get) => ({
     if (Math.abs(Math.log(d / alt)) > 0.08) set({ kameraAbstand: d });
   },
   folgenSetzen: (folgen) => set({ folgen }),
+  zielWahlSetzen: (zielWahl) => set({ zielWahl }),
+  ziehenSetzen: (ziehen) => {
+    const alt = get().ziehen;
+    if (alt && ziehen && alt.behaelterId === ziehen.behaelterId && gleicheAuswahl(alt.ziel, ziehen.ziel)) return;
+    set({ ziehen });
+  },
+  hinweisSetzen: (text) => set({ hinweis: text ? { text, nr: ++hinweisNr } : null }),
   tippSetzen: (tipp) => {
     if (get().tipp !== tipp) set({ tipp });
   },

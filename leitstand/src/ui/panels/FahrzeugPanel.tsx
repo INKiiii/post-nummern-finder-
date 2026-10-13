@@ -9,6 +9,7 @@ import { useAnsicht } from '../../state/ansicht';
 import { useLeitstand } from '../../state/store';
 import { waehleUndZeige } from '../aktionen';
 import { WertKnopf } from '../Rechenweg';
+import { FahrzeugUmplanen } from '../umplanen/Umplanen';
 import { AusScans, Balken, Geschaetzt, PanelKopf, Zeile } from './Gemeinsam';
 
 const SCHNELL = [
@@ -139,7 +140,8 @@ export function FahrzeugPanel({ tourId }: { tourId: string }) {
                 .filter((x) => x.art !== 'fahrt')
                 .map((x, i) => {
                   const bl = x.bezirkId ? lage.bezirk(x.bezirkId) : null;
-                  const zustand = bl?.fertig ? 'erledigt' : bl?.beginn !== null && bl?.beginn !== undefined ? 'aktiv' : '';
+                  const uebergabeFertig = !!x.uebergabeId && lage.uebergabenErledigt.has(x.uebergabeId);
+                  const zustand = bl?.fertig || uebergabeFertig ? 'erledigt' : bl?.beginn !== null && bl?.beginn !== undefined ? 'aktiv' : '';
                   const ankunft = bl?.beginn ?? lage.ankunftBei(tourId, x.s0);
                   return (
                     <li key={i} className={zustand}>
@@ -149,12 +151,14 @@ export function FahrzeugPanel({ tourId }: { tourId: string }) {
                           <button className="link" onClick={() => waehleUndZeige({ art: 'bezirk', id: x.bezirkId! })}>
                             {x.name}
                           </button>
+                        ) : x.uebergabeId ? (
+                          <b>Übergabe · {x.name.replace(`${G.treffpunkt} `, '')}</b>
                         ) : (
                           x.name
                         )}
                         <span className="leise">
                           {' '}
-                          {bl?.fertig ? `fertig ${fmtUhr(bl.ende!)}` : `bis ca. ${fmtUhr(lage.ankunftBei(tourId, x.s1))}`}
+                          {bl?.fertig ? `fertig ${fmtUhr(bl.ende!)}` : x.uebergabeId ? (uebergabeFertig ? 'erledigt' : `am ${G.treffpunkt}`) : `bis ca. ${fmtUhr(lage.ankunftBei(tourId, x.s1))}`}
                           {x.bezirkId && ` · ${ctx.welt.bezirke[x.bezirkId].stopps.length} ${G.stopps}`}
                         </span>
                       </span>
@@ -172,6 +176,8 @@ export function FahrzeugPanel({ tourId }: { tourId: string }) {
           </div>
         </>
       )}
+
+      <FahrzeugUmplanen tourId={tourId} />
 
       <div className="panel-abschnitt">
         <h3>

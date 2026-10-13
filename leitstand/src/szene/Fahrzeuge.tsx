@@ -6,6 +6,7 @@ import type { Prognose } from '../core/lagebild';
 import type { Kontext } from '../core/modell';
 import type { Tour } from '../core/types';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
+import { umplanenAuf } from '../ui/aktionen';
 import { simUhr, useLeitstand } from '../state/store';
 import { setzeAnker } from './beschriftung';
 import { S } from './koord';
@@ -82,7 +83,8 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
   const rampe = rampenPose(ctx.welt, tour.rampe);
   const ich = { art: 'fahrzeug' as const, id: tour.id };
   const gewaehlt = gleicheAuswahl(auswahl, ich);
-  const gehovert = gleicheAuswahl(hover, ich);
+  const ziehen = useAnsicht((s) => s.ziehen);
+  const gehovert = gleicheAuswahl(hover, ich) || gleicheAuswahl(ziehen?.ziel ?? null, ich);
   const dachTextur = useMemo(() => textTextur(String(tour.nr), tour.farbe, '#ffffff', 192, 128), [tour.nr, tour.farbe]);
   const grau = !ctx.tag.start[tour.id].besetzt;
   const zoomRef = useRef(1);
@@ -161,6 +163,7 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
   return (
     <group
       ref={gruppe}
+      userData={{ tourId: tour.id }}
       position={[rampe.x, 0, rampe.z]}
       rotation-y={rampe.rot}
       onPointerOver={(e) => {
@@ -175,6 +178,13 @@ function Fahrzeug({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
       onClick={(e) => {
         if (e.delta > 6) return;
         e.stopPropagation();
+        // Handy: Ziel für einen Behälter wählen statt auswählen
+        const zw = useAnsicht.getState().zielWahl;
+        if (zw) {
+          useAnsicht.getState().zielWahlSetzen(null);
+          umplanenAuf(zw.behaelterId, tour.id);
+          return;
+        }
         waehlen(ich);
         const g = gruppe.current!;
         const faehrt = lage ? !lage.pose(tour.id, simUhr.zeit).anRampe : false;

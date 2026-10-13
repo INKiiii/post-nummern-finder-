@@ -10,25 +10,27 @@
  *  - Prognosen: Soll-Zeiten des Rechenmodells, angepasst an das beobachtete Tempo
  */
 import { G } from '../glossar';
-import { addInhalt, behaelterFolge, fahrMinuten, leeresBisher, zustellMinuten, type Kontext } from './modell';
+import { addInhalt, fahrMinuten, ladungAus, leeresBisher, zustellMinuten, type Kontext } from './modell';
 import {
   baueRoute,
   naechstesS,
   punktBei,
+  routenSchritte,
   suchIndex,
   teilBei,
+  uebergabenAbgleichen,
   verketteRoute,
   verketteZeitplan,
   zeitBeiS,
   zeitplan,
+  type AbgleichEintrag,
   type Route,
-  type RoutenSchritt,
   type RoutenTeil,
   type Zeitplan,
 } from './route';
 import type { ScanEreignis } from './scan';
 import { stoppAnteil, stoppMengen } from './sendungen';
-import type { Inhalt, Plan, StartZustand, Tour } from './types';
+import type { Inhalt, Plan, Schritt, StartZustand, Tour } from './types';
 
 export type FahrzeugPhase = 'rampe' | 'laedt' | 'unterwegs' | 'zurueck';
 export type BehaelterLageStatus = 'halle' | 'verladen' | 'unterwegs' | 'zugestellt';
@@ -58,6 +60,9 @@ export interface FahrzeugLage {
   letzterScan: number | null;
   route: Route;
   soll: Zeitplan;
+  /** Soll-Zeitplan ohne Wartezeiten an Treffpunkten ab sollAbS */
+  sollBasis: Zeitplan;
+  sollAbS: number;
 }
 
 export interface BehaelterLage {
@@ -68,6 +73,8 @@ export interface BehaelterLage {
   seit: number | null;
   /** Woher wissen wir, in welchem Fahrzeug er ist? */
   quelle: 'barcode' | 'pakete' | null;
+  /** zuletzt in ein anderes Fahrzeug umgeladen (Übergabe bzw. Umplanung an der Rampe) */
+  umgeladen: { zeit: number; vonFahrzeug: string } | null;
 }
 
 export interface BezirkLage {
@@ -140,6 +147,8 @@ export class Lagebild {
   private bez = new Map<string, BezirkLage>();
   /** Zustellscans in zeitlicher Reihenfolge (z. B. für das Leuchten der Häuser) */
   readonly zustellungen: Zustellung[] = [];
+  /** Übergaben, bei denen alle Behälter im neuen Fahrzeug gescannt sind */
+  readonly uebergabenErledigt = new Set<string>();
   /** Zähler je Ereignisart */
   zaehler: Record<string, number> = {};
   anzahl = 0;
@@ -165,10 +174,12 @@ export class Lagebild {
         letzterScan: null,
         route: baueRoute(ctx, ctx.welt.basis.knoten, []),
         soll: { s: [0], t: [0] },
+        sollBasis: { s: [0], t: [0] },
+        sollAbS: 0,
       });
     }
     for (const b of ctx.tag.behaelterIds) {
-      this.beh.set(b, { id: b, status: 'halle', fahrzeugId: null, tourId: null, seit: null, quelle: null });
+      this.beh.set(b, { id: b, status: 'halle', fahrzeugId: null, tourId: null, seit: null, quelle: null, umgeladen: null });
       this.bez.set(ctx.tag.behaelter[b].zielbezirk, {
         bezirkId: ctx.tag.behaelter[b].zielbezirk,
         behaelterId: b,
@@ -181,6 +192,7 @@ export class Lagebild {
       });
     }
     for (const t of ctx.tag.touren) this.sollRouteNeu(t.id, null);
+    this.sollAbgleichen();
   }
 
   // -------------------------------------------------------------------------------------
@@ -211,21 +223,52 @@ export class Lagebild {
   /** Soll-Route einer Tour aus dem Plan (unterwegs: ab Commit-Punkt verkettet) */
   private sollRouteNeu(tourId: string, commit: { s: number; t: number } | null): void {
     const f = this.fz.get(tourId)!;
-    const folge = behaelterFolge(this.plan, tourId);
+    const schritte = this.plan.touren[tourId]?.schritte ?? [];
     if (!commit) {
-      f.route = baueRoute(this.ctx, this.ctx.welt.basis.knoten, folge.map((b): RoutenSchritt => ({ art: 'bezirk', behaelterId: b })), true);
-      f.soll = this.sollZeitplan(f.route, f.tourStart ?? this.geplanteAbfahrt(tourId));
+      f.route = baueRoute(this.ctx, this.ctx.welt.basis.knoten, routenSchritte(schritte), true);
+      f.sollBasis = this.sollZeitplan(f.route, f.tourStart ?? this.geplanteAbfahrt(tourId));
+      f.sollAbS = 0;
+      f.soll = f.sollBasis;
       return;
     }
     const erledigt = new Set(f.route.teile.filter((x) => x.art === 'bezirk' && x.s1 <= commit.s + 1e-9).map((x) => x.behaelterId!));
     const anBord = new Set(f.behaelter);
-    const rest = folge.filter((b) => !erledigt.has(b) && anBord.has(b));
+    const rest = this.offeneSchritte(f, schritte, erledigt, anBord, commit.s);
     const knoten = f.route.knoten[Math.max(0, f.route.s.findIndex((x) => x >= commit.s - 1e-9))];
-    const neu = baueRoute(this.ctx, knoten, rest.map((b): RoutenSchritt => ({ art: 'bezirk', behaelterId: b })), true);
+    const neu = baueRoute(this.ctx, knoten, routenSchritte(rest), true);
     const tSoll = zeitBeiS(f.soll, commit.s).abfahrt;
     const neuZp = this.sollZeitplan(neu, tSoll);
-    f.soll = verketteZeitplan(f.soll, commit.s, tSoll, neuZp);
+    f.sollBasis = verketteZeitplan(f.soll, commit.s, tSoll, neuZp);
+    f.soll = f.sollBasis;
+    f.sollAbS = commit.s;
     f.route = verketteRoute(f.route, commit.s, neu);
+  }
+
+  /**
+   * Noch offene Planschritte einer Tour unterwegs: Übergaben, die noch nicht stattgefunden
+   * haben, und Bezirke für Behälter an Bord oder solche, die bei einer Übergabe dazukommen.
+   */
+  private offeneSchritte(f: FahrzeugLage, schritte: readonly Schritt[], erledigt: Set<string>, anBord: Set<string>, abS: number): Schritt[] {
+    const rest: Schritt[] = [];
+    const kommt = new Set<string>();
+    for (const x of schritte) {
+      if (x.art === 'uebergabe') {
+        if (this.uebergabenErledigt.has(x.id)) continue;
+        const teil = f.route.teile.find((y) => y.art === 'treffpunkt' && y.uebergabeId === x.id);
+        if (teil && teil.s0 < abS - 1e-9) continue;
+        rest.push(x);
+        for (const b of x.aufnehmen) kommt.add(b);
+      } else if (!erledigt.has(x.behaelterId) && (anBord.has(x.behaelterId) || kommt.has(x.behaelterId))) rest.push(x);
+    }
+    return rest;
+  }
+
+  /** Soll-Zeiten: wer zuerst am Treffpunkt ist, wartet auf den Partner */
+  private sollAbgleichen(): void {
+    const eintraege = new Map<string, AbgleichEintrag>();
+    for (const [id, f] of this.fz) eintraege.set(id, { route: f.route, zp: f.sollBasis, abS: f.sollAbS });
+    const { zeitplaene } = uebergabenAbgleichen(eintraege, this.uebergabenErledigt);
+    for (const [id, zp] of zeitplaene) this.fz.get(id)!.soll = zp;
   }
 
   /**
@@ -246,6 +289,7 @@ export class Lagebild {
         this.sollRouteNeu(t.id, c);
       }
     }
+    this.sollAbgleichen();
     return commits;
   }
 
@@ -254,8 +298,10 @@ export class Lagebild {
     this.ctx = ctx;
     for (const t of ctx.tag.touren) {
       const f = this.fz.get(t.id)!;
-      f.soll = this.sollZeitplan(f.route, f.tourStart ?? this.geplanteAbfahrt(t.id));
+      f.sollBasis = this.sollZeitplan(f.route, f.tourStart ?? this.geplanteAbfahrt(t.id));
+      f.sollAbS = 0;
     }
+    this.sollAbgleichen();
   }
 
   // -------------------------------------------------------------------------------------
@@ -285,11 +331,17 @@ export class Lagebild {
         const p = this.sendungen.get(e.sendung);
         if (!f || !p) break;
         if (p.status === 'basis') f.pakete.geladen++;
+        else if (p.status === 'fahrzeug' && p.fahrzeug && p.fahrzeug !== e.fahrzeug) {
+          // umgeladen (Übergabe): zählt jetzt beim neuen Fahrzeug
+          const alt = this.fahrzeugLage(p.fahrzeug);
+          if (alt) alt.pakete.geladen--;
+          f.pakete.geladen++;
+        }
         p.status = 'fahrzeug';
         p.fahrzeug = e.fahrzeug;
         // ohne Barcode am Behälter: Zuordnung aus den Ladescans der Pakete
         const b = this.beh.get(p.behaelter);
-        if (b && b.status === 'halle') this.behaelterVerladen(p.behaelter, f, e.zeit, 'pakete');
+        if (b && (b.status === 'halle' || (b.fahrzeugId !== f.fahrzeugId && b.status !== 'zugestellt'))) this.behaelterVerladen(p.behaelter, f, e.zeit, 'pakete');
         f.letzterScan = e.zeit;
         break;
       }
@@ -301,8 +353,9 @@ export class Lagebild {
         f.ref = { t: e.zeit, s: 0 };
         f.stehtSeit = e.zeit;
         // Soll-Zeit ab dem tatsächlichen Start
-        const verschiebung = e.zeit - f.soll.t[0];
-        f.soll = { s: f.soll.s, t: f.soll.t.map((t) => t + verschiebung) };
+        const verschiebung = e.zeit - f.sollBasis.t[0];
+        f.sollBasis = { s: f.sollBasis.s, t: f.sollBasis.t.map((t) => t + verschiebung) };
+        this.sollAbgleichen();
         for (const b of f.behaelter) this.beh.get(b)!.status = 'unterwegs';
         break;
       }
@@ -358,6 +411,7 @@ export class Lagebild {
     if (b.fahrzeugId && b.fahrzeugId !== f.fahrzeugId) {
       const alt = this.fahrzeugLage(b.fahrzeugId);
       if (alt) alt.behaelter = alt.behaelter.filter((x) => x !== id);
+      b.umgeladen = { zeit, vonFahrzeug: b.fahrzeugId };
     }
     if (!f.behaelter.includes(id)) f.behaelter.push(id);
     b.status = f.phase === 'unterwegs' ? 'unterwegs' : 'verladen';
@@ -365,10 +419,16 @@ export class Lagebild {
     b.tourId = f.tourId;
     b.seit = b.seit ?? zeit;
     if (quelle === 'barcode' || !b.quelle) b.quelle = quelle;
+    // Übergabe erledigt, sobald alle übernommenen Behälter im Fahrzeug sind
+    for (const x of this.plan.touren[f.tourId]?.schritte ?? []) {
+      if (x.art !== 'uebergabe' || !x.aufnehmen.includes(id) || this.uebergabenErledigt.has(x.id)) continue;
+      if (x.aufnehmen.every((y) => f.behaelter.includes(y))) this.uebergabenErledigt.add(x.id);
+    }
     if (f.phase === 'rampe') {
       f.phase = 'laedt';
       f.beladenSeit = zeit;
       this.sollRouteNeu(f.tourId, null);
+      this.sollAbgleichen();
     }
   }
 
@@ -557,9 +617,13 @@ export class Lagebild {
     const naechster = ziel
       ? { name: ziel.name, art: ziel.art, ankunft: this.ankunftBei(tourId, ziel.s0), ende: this.ankunftBei(tourId, ziel.s1), vorOrt }
       : { name: G.zustellbasis, art: 'basis' as const, ankunft: ende, ende, vorOrt: false };
+    const amTreffpunkt = f.route.teile.find(
+      (x) => x.art === 'treffpunkt' && x.uebergabeId && !this.uebergabenErledigt.has(x.uebergabeId) && Math.abs(x.s0 - sRef) < 0.02,
+    );
     let statusText: string;
     if (f.phase === 'rampe') statusText = `An ${G.rampe}`;
-    else if (f.phase === 'laedt') statusText = `Wird beladen (${f.behaelter.length} von ${behaelterFolge(this.plan, tourId).length} ${G.behaelterPlural})`;
+    else if (f.phase === 'laedt') statusText = `Wird beladen (${f.behaelter.length} von ${ladungAus(this.plan.touren[tourId]?.schritte ?? []).length} ${G.behaelterPlural})`;
+    else if (amTreffpunkt) statusText = `Übergabe am ${amTreffpunkt.name}`;
     else if (vorOrt) statusText = `Stellt zu in ${ziel!.name}`;
     else if (naechster.art === 'basis') statusText = `Rückfahrt zur ${G.zustellbasis}`;
     else statusText = `Fährt nach ${naechster.name}`;
@@ -579,7 +643,10 @@ export class Lagebild {
     // Fahrt: etwas voraus (Meldungen sind bis zu einer Minute alt), dann nächster Knoten
     const voraus = sRef + ((Math.max(0, zeit - (f.ref?.t ?? zeit)) + 1.5) / 60) * this.ctx.annahmen.tempoZwischenKmh * 1.2;
     const i = f.route.s.findIndex((x) => x >= Math.min(voraus, f.route.laenge));
-    const s = i < 0 ? f.route.laenge : f.route.s[i];
+    let s = i < 0 ? f.route.laenge : f.route.s[i];
+    // nicht über einen Treffpunkt hinaus, an dem noch eine Übergabe ansteht
+    const tp = f.route.teile.find((x) => x.art === 'treffpunkt' && x.uebergabeId && !this.uebergabenErledigt.has(x.uebergabeId) && x.s0 >= sRef - 1e-9 && x.s0 < s);
+    if (tp) s = tp.s0;
     const t2 = teilBei(f.route, s);
     if (t2?.art === 'bezirk' && s > t2.s0 + 1e-6) return { s: t2.s1, t: this.ankunftBei(tourId, t2.s1) };
     return { s, t: this.ankunftBei(tourId, s) };
@@ -633,29 +700,33 @@ export class Lagebild {
     for (const t of this.ctx.tag.touren) {
       const s = start[t.id];
       const fertig = new Set(s.erledigt);
-      const schritte = (this.plan.touren[t.id]?.schritte ?? []).filter((x) => x.art !== 'bezirk' || !fertig.has(x.behaelterId));
-      touren[t.id] = {
-        schritte: schritte.filter((x) => {
-          if (x.art !== 'bezirk' || s.mussLaden) return true;
-          if (s.geladen.includes(x.behaelterId)) return true;
-          liegen.add(x.behaelterId); // unterwegs, aber nicht an Bord: bleibt heute liegen
-          return false;
-        }),
-      };
+      const kommt = new Set<string>();
+      const schritte: Schritt[] = [];
+      for (const x of this.plan.touren[t.id]?.schritte ?? []) {
+        if (x.art === 'uebergabe') {
+          if (this.uebergabenErledigt.has(x.id)) continue;
+          schritte.push(x);
+          for (const b of x.aufnehmen) kommt.add(b);
+          continue;
+        }
+        if (fertig.has(x.behaelterId)) continue;
+        if (s.mussLaden || s.geladen.includes(x.behaelterId) || kommt.has(x.behaelterId)) schritte.push(x);
+        else liegen.add(x.behaelterId); // unterwegs, aber nicht an Bord: bleibt heute liegen
+      }
+      touren[t.id] = { schritte };
     }
     const erledigtAlle = new Set(Object.values(start).flatMap((s) => s.erledigt));
     return { touren, liegenLassen: [...liegen].filter((b) => !erledigtAlle.has(b)) };
   }
 }
 
-/** Tagesplan = erledigte Schritte + neuer Restplan */
-export function zusammenfuehren(tagesplan: Plan, restplan: Plan, start: Record<string, StartZustand>): Plan {
+/** Tagesplan = erledigte Schritte (Bezirke und Übergaben) + neuer Restplan */
+export function zusammenfuehren(tagesplan: Plan, restplan: Plan, start: Record<string, StartZustand>, uebergabenErledigt: ReadonlySet<string> = new Set()): Plan {
   const touren: Plan['touren'] = {};
   for (const id of Object.keys(tagesplan.touren)) {
     const fertig = new Set(start[id]?.erledigt ?? []);
-    const vorher = (tagesplan.touren[id]?.schritte ?? []).filter((x) => x.art === 'bezirk' && fertig.has(x.behaelterId));
+    const vorher = (tagesplan.touren[id]?.schritte ?? []).filter((x) => (x.art === 'bezirk' ? fertig.has(x.behaelterId) : uebergabenErledigt.has(x.id)));
     touren[id] = { schritte: [...vorher, ...(restplan.touren[id]?.schritte ?? [])] };
   }
   return { touren, liegenLassen: [...restplan.liegenLassen] };
 }
-

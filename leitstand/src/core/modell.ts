@@ -282,13 +282,7 @@ export function bewertePlan(ctx: Kontext, plan: Plan): PlanAuswertung {
   // Beladen: alles, was die Tour zustellt oder abgibt und nicht unterwegs aufnimmt
   for (const l of laeufe) {
     if (!l.aktiv || !l.s.mussLaden) continue;
-    const aufgenommen = new Set<string>();
-    const ladung: string[] = [];
-    for (const s of l.schritte) {
-      const liste = s.art === 'bezirk' ? [s.behaelterId] : s.abgeben;
-      for (const b of liste) if (!l.anBord.has(b) && !aufgenommen.has(b) && !ladung.includes(b)) ladung.push(b);
-      if (s.art === 'uebergabe') for (const b of s.aufnehmen) aufgenommen.add(b);
-    }
+    const ladung = ladungAus(l.schritte, l.anBord);
     for (const b of ladung) {
       if (!inHalle(b)) fehler.push(`Tour ${tourNr(ctx, l.id)} soll Behälter ${b} laden, der nicht mehr in der Halle steht.`);
       l.anBord.add(b);
@@ -586,6 +580,18 @@ export function vergleiche(alt: PlanAuswertung, neu: PlanAuswertung, a: Annahmen
     betroffen,
     liegen: neu.liegen.behaelter.length - alt.liegen.behaelter.length,
   };
+}
+
+/** Behälter, die eine Tour beim Beladen aus der Halle nimmt: was sie zustellt oder abgibt und nicht unterwegs aufnimmt */
+export function ladungAus(schritte: readonly Schritt[], anBord: ReadonlySet<string> = new Set()): string[] {
+  const aufgenommen = new Set<string>();
+  const ladung: string[] = [];
+  for (const s of schritte) {
+    const liste = s.art === 'bezirk' ? [s.behaelterId] : s.abgeben;
+    for (const b of liste) if (!anBord.has(b) && !aufgenommen.has(b) && !ladung.includes(b)) ladung.push(b);
+    if (s.art === 'uebergabe') for (const b of s.aufnehmen) aufgenommen.add(b);
+  }
+  return ladung;
 }
 
 /** Behälter der Touren in Gangfolge (nur Bezirksschritte) */

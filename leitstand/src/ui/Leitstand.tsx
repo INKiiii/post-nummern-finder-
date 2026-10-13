@@ -15,6 +15,9 @@ import { BehaelterPanel } from './panels/BehaelterPanel';
 import { BezirkPanel } from './panels/BezirkPanel';
 import { FahrzeugPanel } from './panels/FahrzeugPanel';
 import { Balken } from './panels/Gemeinsam';
+import { VorschlaegePanel } from './panels/VorschlaegePanel';
+import { Hinweise } from './umplanen/Hinweise';
+import { VorschauKarte } from './umplanen/VorschauKarte';
 import { WertKnopf } from './Rechenweg';
 import { useZeitTasten } from './takt';
 import { Zeitleiste } from './Zeitleiste';
@@ -48,7 +51,8 @@ export function Leitstand() {
   const [info, setInfo] = useState(false);
   const [menue, setMenue] = useState(false);
   const [blattOffen, setBlattOffen] = useState(true);
-  const [blattTab, setBlattTab] = useState<'touren' | 'ereignisse'>('touren');
+  const [blattTab, setBlattTab] = useState<'touren' | 'vorschlaege' | 'ereignisse'>('touren');
+  const [vorschlaegeOffen, setVorschlaegeOffen] = useState(false);
   useZeitTasten();
   const [ereignisse, setEreignisseRoh] = useState(ereignisseAnfangs);
   const setEreignisse = (an: boolean) => {
@@ -63,7 +67,12 @@ export function Leitstand() {
   useEffect(() => {
     const taste = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-      if (e.key === 'Escape') useAnsicht.getState().waehlen(null);
+      if (e.key === 'Escape') {
+        const a = useAnsicht.getState();
+        if (a.zielWahl) a.zielWahlSetzen(null);
+        else if (useLeitstand.getState().vorschau) useLeitstand.getState().vorschauSetzen(null);
+        else a.waehlen(null);
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) useLeitstand.getState().wiederholen();
@@ -77,6 +86,13 @@ export function Leitstand() {
   useEffect(() => {
     if (ansicht.auswahl) setBlattOffen(true);
   }, [ansicht.auswahl]);
+
+  // Handy: zum Antippen des Ziel-Fahrzeugs das Blatt einklappen, danach wieder öffnen
+  const zielWahlAktiv = !!ansicht.zielWahl;
+  useEffect(() => {
+    if (!schmal) return;
+    setBlattOffen(!zielWahlAktiv);
+  }, [zielWahlAktiv, schmal]);
 
   const { ctx, plan, auswertung: aus, startAuswertung: start, lage, prognose, zeit } = s;
   if (!ctx || !plan || !aus || !start || !lage) return <div className="laden">Lade Demo-Welt …</div>;
@@ -107,6 +123,15 @@ export function Leitstand() {
     ) : a?.art === 'basis' ? (
       <BasisPanel />
     ) : null;
+
+  const anzahlVorschlaege = s.vorschlaege.filter((v) => v.delta.euroTag > 0.5 || v.art === 'ausfall' || v.delta.ueberstundenMin < -0.5).length;
+  const vorschlaegeZeigen = () => {
+    ansicht.waehlen(null);
+    setVorschlaegeOffen(true);
+    setBlattTab('vorschlaege');
+    setBlattOffen(true);
+  };
+  const rechts = panel ?? (vorschlaegeOffen ? <VorschlaegePanel onSchliessen={() => setVorschlaegeOffen(false)} /> : null);
 
   const kennzahlen = (
     <div className="kennzahlen-leiste">
@@ -198,6 +223,13 @@ export function Leitstand() {
           <button className="knopf" onClick={basisZeigen}>
             Basis zeigen
           </button>
+          <button
+            className={`knopf nur-breit ${vorschlaegeOffen && !panel ? 'an' : ''}`}
+            onClick={() => (vorschlaegeOffen && !panel ? setVorschlaegeOffen(false) : vorschlaegeZeigen())}
+            aria-pressed={vorschlaegeOffen && !panel}
+          >
+            Vorschläge{anzahlVorschlaege > 0 && <span className="zaehler">{anzahlVorschlaege}</span>}
+          </button>
           <button className={`knopf nur-breit ${ereignisse ? 'an' : ''}`} onClick={() => setEreignisse(!ereignisse)} aria-pressed={ereignisse}>
             Ereignisse
           </button>
@@ -244,27 +276,36 @@ export function Leitstand() {
           <div className="blatt-uhr">
             <Zeitleiste kompakt />
           </div>
-          {blattOffen && !panel && (
+          {blattOffen && !panel && !s.vorschau && (
             <div className="blatt-tabs umschalter" role="tablist">
               <button className={blattTab === 'touren' ? 'an' : ''} onClick={() => setBlattTab('touren')}>
                 {G.touren}
+              </button>
+              <button className={blattTab === 'vorschlaege' ? 'an' : ''} onClick={() => setBlattTab('vorschlaege')}>
+                Vorschläge{anzahlVorschlaege > 0 && <span className="zaehler">{anzahlVorschlaege}</span>}
               </button>
               <button className={blattTab === 'ereignisse' ? 'an' : ''} onClick={() => setBlattTab('ereignisse')}>
                 Ereignisse
               </button>
             </div>
           )}
-          {blattOffen && (
-            <div className="blatt-inhalt" key={a ? `${a.art}:${a.id}` : blattTab}>
-              {panel ??
+          {(blattOffen || s.vorschau) && (
+            <div className="blatt-inhalt" key={s.vorschau ? 'vorschau' : a ? `${a.art}:${a.id}` : blattTab}>
+              {s.vorschau ? (
+                <VorschauKarte />
+              ) : (
+                (panel ??
                 (blattTab === 'touren' ? (
                   <>
                     {kennzahlen}
                     {tourenListe}
                   </>
+                ) : blattTab === 'vorschlaege' ? (
+                  <VorschlaegePanel onSchliessen={() => setBlattTab('touren')} />
                 ) : (
                   <EreignisPanel />
-                ))}
+                )))
+              )}
             </div>
           )}
         </section>
@@ -276,7 +317,12 @@ export function Leitstand() {
             <h3 className="abschnitt-titel">{G.touren}</h3>
             {tourenListe}
           </aside>
-          {panel && <aside className="ls-rechts glas">{panel}</aside>}
+          {rechts && <aside className="ls-rechts glas">{rechts}</aside>}
+          {s.vorschau && (
+            <div className="ls-vorschau glas">
+              <VorschauKarte />
+            </div>
+          )}
           <div className="ls-uhr glas">
             <Zeitleiste />
           </div>
@@ -288,6 +334,7 @@ export function Leitstand() {
         </>
       )}
 
+      <Hinweise />
       {info && <InfoDialog onSchliessen={() => setInfo(false)} />}
     </div>
   );

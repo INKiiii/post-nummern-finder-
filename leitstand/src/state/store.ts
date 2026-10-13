@@ -12,12 +12,13 @@ import { create } from 'zustand';
 import { standardAnnahmen, type Annahmen, type AnnahmeSchluessel } from '../config';
 import { DemoTourDataSource } from '../core/demoQuelle';
 import { Lagebild, zusammenfuehren } from '../core/lagebild';
-import { bewertePlan, erstelleKontext, type Kontext, type PlanAuswertung } from '../core/modell';
+import { bewertePlan, erstelleKontext, vergleiche, type Delta, type Kontext, type PlanAuswertung } from '../core/modell';
 import type { FahrerNachricht, TourDataSource } from '../core/quellen';
 import type { ScanEreignis } from '../core/scan';
 import { SimulierteScanner } from '../core/simulation';
 import type { Plan, StartZustand, Tag, Welt } from '../core/types';
-import type { Vorschlag } from '../core/vorschlaege';
+import { neueUebergaben, type UebergabeInfo } from '../core/uebergabe';
+import { planDiff, type Aenderung, type Vorschlag, type VorschlagArt } from '../core/vorschlaege';
 import { BroadcastFahrerGeraet } from '../geraet/kanal';
 import { KernClient } from '../worker/kernClient';
 
@@ -39,6 +40,25 @@ export type LogEintrag =
 
 export interface GesendeteNachricht extends FahrerNachricht {
   bestaetigt: number | null;
+}
+
+/** Vorschau einer Umplanung: noch nicht übernommen, in 3D und als Karte sichtbar */
+export interface Vorschau {
+  titel: string;
+  text?: string;
+  art: VorschlagArt | 'andereTour' | 'tauschen';
+  /** neuer Restplan (ab jetzt, zum Live-Kontext) */
+  rest: Plan;
+  /** Tagesplan nach dem Übernehmen */
+  tagesplan: Plan;
+  alt: PlanAuswertung;
+  neu: PlanAuswertung;
+  delta: Delta;
+  aenderungen: Aenderung[];
+  reihenfolge: string[];
+  uebergaben: UebergabeInfo[];
+  wiederkehrend: boolean;
+  warnung?: string;
 }
 
 interface LeitstandZustand {
@@ -75,6 +95,7 @@ interface LeitstandZustand {
   nachrichten: GesendeteNachricht[];
   /** zuletzt gemeldete Geräte (Tour → Zeitpunkt, Date.now) */
   geraete: Record<string, number>;
+  vorschau: Vorschau | null;
 
   laden: (quelle?: TourDataSource) => Promise<void>;
   planSetzen: (plan: Plan, label: string) => void;
@@ -93,6 +114,12 @@ interface LeitstandZustand {
   tagNeuStarten: () => void;
   barcodeSetzen: (an: boolean) => void;
   nachrichtSenden: (tourId: string, titel: string, text: string) => void;
+  /** Vorschau für einen neuen Restplan bauen (null, wenn ungültig) */
+  vorschauBauen: (rest: Plan, titel: string, art: Vorschau['art'], text?: string) => Vorschau | null;
+  vorschauAusVorschlag: (v: Vorschlag) => Vorschau | null;
+  /** Vorschau zeigen (hält die Uhr an) bzw. schließen */
+  vorschauSetzen: (v: Vorschau | null) => void;
+  vorschauUebernehmen: () => void;
 }
 
 let kern: KernClient | null = null;
@@ -108,6 +135,8 @@ let letzteZeitPost = 0;
 let letzteLive = -Infinity;
 let geraeteNr = 0;
 let nachrichtNr = 0;
+/** lief die Uhr, bevor die Vorschau sie angehalten hat? */
+let laufVorVorschau = false;
 
 export const useLeitstand = create<LeitstandZustand>((set, get) => {
   /** Kontext und Planbewertung (ganzer Tag) neu berechnen */
@@ -268,6 +297,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     prognose: null,
     nachrichten: [],
     geraete: {},
+    vorschau: null,
 
     laden: async (quelle = new DemoTourDataSource()) => {
       const { welt, tag, plan } = await quelle.ladeTag();
@@ -282,6 +312,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     planSetzen: (plan, label) => {
+      get().vorschauSetzen(null);
       const { verlauf, verlaufIndex, lage, ctx } = get();
       const neu = [...verlauf.slice(0, verlaufIndex + 1), { plan, label }];
       set({ plan, verlauf: neu, verlaufIndex: neu.length - 1 });
@@ -293,12 +324,60 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     restplanUebernehmen: (rest, label) => {
-      const { plan, startLive } = get();
+      const { plan, startLive, lage } = get();
       if (!plan || !startLive) return;
-      get().planSetzen(zusammenfuehren(plan, rest, startLive), label);
+      get().planSetzen(zusammenfuehren(plan, rest, startLive, lage?.uebergabenErledigt), label);
+    },
+
+    vorschauBauen: (rest, titel, art, text) => {
+      const { ctxLive, restplan, prognose, plan, startLive, lage, annahmen } = get();
+      if (!ctxLive || !restplan || !prognose || !plan || !startLive) return null;
+      const neu = bewertePlan(ctxLive, rest);
+      if (!neu.gueltig) return null;
+      const diff = planDiff(ctxLive, restplan, rest);
+      return {
+        titel,
+        text,
+        art,
+        rest,
+        tagesplan: zusammenfuehren(plan, rest, startLive, lage?.uebergabenErledigt),
+        alt: prognose,
+        neu,
+        delta: vergleiche(prognose, neu, annahmen),
+        aenderungen: diff.aenderungen,
+        reihenfolge: diff.reihenfolge,
+        uebergaben: neueUebergaben(ctxLive, restplan, rest, neu),
+        wiederkehrend: Object.values(startLive).every((x) => x.mussLaden),
+      };
+    },
+
+    vorschauAusVorschlag: (v) => {
+      const x = get().vorschauBauen(v.plan, v.titel, v.art, v.text);
+      return x ? { ...x, warnung: v.warnung, wiederkehrend: v.wiederkehrend } : null;
+    },
+
+    vorschauSetzen: (v) => {
+      const { vorschau, laeuft } = get();
+      if (v && !vorschau) {
+        laufVorVorschau = laeuft;
+        set({ vorschau: v, laeuft: false });
+        geraet?.post({ typ: 'zeit', zeit: simUhr.zeit, laeuft: false, tempo: get().tempo });
+      } else if (v) set({ vorschau: v });
+      else if (vorschau) {
+        set({ vorschau: null, laeuft: laufVorVorschau && simUhr.zeit < TAG_ENDE });
+        laufVorVorschau = false;
+      }
+    },
+
+    vorschauUebernehmen: () => {
+      const v = get().vorschau;
+      if (!v) return;
+      get().restplanUebernehmen(v.rest, v.titel);
+      get().vorschauSetzen(null);
     },
 
     rueckgaengig: () => {
+      get().vorschauSetzen(null);
       const { verlauf, verlaufIndex, lage, ctx } = get();
       if (verlaufIndex <= 0) return;
       const e = verlauf[verlaufIndex - 1];
@@ -307,6 +386,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     wiederholen: () => {
+      get().vorschauSetzen(null);
       const { verlauf, verlaufIndex, lage, ctx } = get();
       if (verlaufIndex >= verlauf.length - 1) return;
       const e = verlauf[verlaufIndex + 1];
@@ -357,6 +437,11 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     startPause: () => {
+      // mit offener Vorschau: Start heißt Vorschau verwerfen
+      if (get().vorschau) {
+        laufVorVorschau = false;
+        set({ vorschau: null });
+      }
       const laeuft = !get().laeuft && simUhr.zeit < TAG_ENDE;
       set({ laeuft });
       geraet?.post({ typ: 'zeit', zeit: simUhr.zeit, laeuft, tempo: get().tempo });
@@ -365,6 +450,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     tempoSetzen: (tempo) => set({ tempo }),
 
     zeitSetzen: (t) => {
+      if (get().vorschau) get().vorschauSetzen(null);
       const ziel = Math.max(TAG_BEGINN, Math.min(TAG_ENDE, t));
       if (ziel >= simUhr.zeit) {
         const neu = verarbeitenBis(ziel, false);
@@ -381,6 +467,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     tagNeuStarten: () => {
+      get().vorschauSetzen(null);
       const { startplan } = get();
       if (!startplan) return;
       chronik = [{ zeit: -Infinity, plan: startplan, label: 'Startplan' }];
@@ -389,6 +476,7 @@ export const useLeitstand = create<LeitstandZustand>((set, get) => {
     },
 
     barcodeSetzen: (an) => {
+      get().vorschauSetzen(null);
       set({ behaelterBarcode: an });
       tagAufbauen(simUhr.zeit);
     },

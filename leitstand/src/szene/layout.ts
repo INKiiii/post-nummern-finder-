@@ -110,3 +110,42 @@ export function rollPosition(platz: Pose, tuer: { x: number; z: number }, fahrze
   const k = Math.min(1, (s - l1) / l2);
   return { x: b.x + (c.x - b.x) * k, z: b.z + (c.z - b.z) * k };
 }
+
+/** Position auf einem Streckenzug (u = 0…1, sanft beschleunigt und gebremst) */
+export function wegPosition(punkte: ReadonlyArray<{ x: number; z: number }>, u: number): { x: number; z: number } {
+  const e = glatt(u);
+  const laengen = punkte.slice(1).map((p, i) => Math.hypot(p.x - punkte[i].x, p.z - punkte[i].z));
+  const gesamt = laengen.reduce((a, b) => a + b, 0);
+  if (gesamt === 0) return { ...punkte[punkte.length - 1] };
+  let rest = e * gesamt;
+  for (let i = 0; i < laengen.length; i++) {
+    if (rest <= laengen[i] || i === laengen.length - 1) {
+      const k = laengen[i] > 0 ? Math.min(1, rest / laengen[i]) : 1;
+      return { x: punkte[i].x + (punkte[i + 1].x - punkte[i].x) * k, z: punkte[i].z + (punkte[i + 1].z - punkte[i].z) * k };
+    }
+    rest -= laengen[i];
+  }
+  return { ...punkte[punkte.length - 1] };
+}
+
+/** Umladen an der Rampe: aus dem einen Laderaum durch die Halle in den anderen */
+export function umladeWeg(welt: Welt, rampeVon: number, rampeNach: number): Array<{ x: number; z: number }> {
+  const a = rampenPose(welt, rampeVon);
+  const b = rampenPose(welt, rampeNach);
+  const ta = rampenTuer(welt, rampeVon);
+  const tb = rampenTuer(welt, rampeNach);
+  return [
+    { x: a.x, z: a.z + 0.15 },
+    { x: ta.x, z: ta.z + 0.12 },
+    { x: ta.x, z: ta.z + 0.6 },
+    { x: tb.x, z: tb.z + 0.6 },
+    { x: tb.x, z: tb.z + 0.12 },
+    { x: b.x, z: b.z + 0.15 },
+  ];
+}
+
+/** Platzwechsel in der Halle über den Gang hinter den Reihen */
+export function hallenWeg(von: { x: number; z: number }, nach: { x: number; z: number }): Array<{ x: number; z: number }> {
+  const gang = Math.max(von.z, nach.z) + 0.35;
+  return [von, { x: von.x, z: gang }, { x: nach.x, z: gang }, nach];
+}

@@ -16,7 +16,7 @@ Systemen. Das Design ist neutral, ohne Firmenlogo, Markenfarben oder Firmennamen
 | 2 | 3D-Szene statisch, Klick-Panels | fertig |
 | 3 | Datenquellen-Schicht: Scan-Ereignisse, Lagebild, Fahrergerät, Seite „Datenquellen“ | fertig |
 | 4 | Animation (Beladen, Spuren, Häuser leuchten), Zeitsteuerung verfeinern | fertig |
-| 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D) | offen |
+| 5 | Umplanen, Vorschläge, Ersparnis mit Rechenweg (in 3D), Übergaben am Treffpunkt | fertig |
 | 6 | Fahrer-Ansicht: Benachrichtigungen bei Umplanung | offen |
 | 7 | Szenarien | offen |
 | 8 | Demo-Modus, „Idee in Zahlen“, GitHub Pages | offen |
@@ -51,7 +51,28 @@ Vorschläge, Annahmen) liegt unter `#/kern` (Menü ☰ → „Rechenkern“).
   *Bezirk* (Klick auf ein Haus) und *Basis* (Klick aufs Hallendach).
 * Die Dächer der Häuser zeigen die Farbe ihrer Tour (abschaltbar im Menü).
 * Auf dem Handy rechnet die Szene sparsamer (weniger Schatten und Bäume); im Menü umschaltbar.
-* Escape hebt die Auswahl auf, Strg+Z / Strg+Umschalt+Z = Rückgängig / Wiederholen.
+* Escape hebt die Auswahl auf (bzw. schließt die Vorschau), Strg+Z / Strg+Umschalt+Z = Rückgängig / Wiederholen.
+
+### Umplanen (mit Vorschau und Ersparnis)
+
+* **Vorschläge** (Knopf oben, auf dem Handy Reiter im Blatt): Tour einsparen, Überlastung
+  abbauen, Behälter umlegen, Reihenfolge ändern, Ausfall auffangen. Vor der Abfahrt für den
+  ganzen Tag, danach **ab jetzt** aus dem Lagebild.
+* **Andere Tour** (Behälter anklicken → „Umplanen“): alle Touren mit Ende danach und Δ €/Tag,
+  die beste ist markiert. In der Halle wird einfach anders verladen; ist der Behälter schon
+  unterwegs, geht es per **Übergabe an einem Treffpunkt**.
+* **Fahrzeug-Aktionen** (Fahrzeug anklicken → „Umplanen“): *Behälter abgeben an …* und
+  *Gebiet tauschen*; dazu wie bisher *Nachricht an das Gerät*.
+* **Drag & Drop** am Laptop: Behälter in der Halle auf ein Fahrzeug ziehen (andere Tour) oder
+  auf einen anderen Behälter (tauschen). Auf dem Handy: „Fahrzeug in 3D antippen“.
+* Jede Änderung öffnet erst eine **Vorschau** – die Uhr steht so lange:
+  * in 3D die neuen Routen gestrichelt, Treffpunkt mit Uhrzeit, Dächer in der neuen Tourfarbe,
+    am Fahrzeug die Verschiebung des Tourendes;
+  * als Karte Δ km, Δ Arbeitszeit, Δ €/Tag, Δ €/Jahr. Jede Euro-Zahl lässt sich antippen
+    („Wie kommt die Zahl zustande?“).
+* **Übernehmen** gilt ab jetzt (laufende Bezirke werden fertig zugestellt), **Rückgängig**
+  stellt den vorherigen Plan wieder her. Danach rollt der Behälter in der Halle über den Gang
+  zu seinem neuen Platz bzw. springt am Treffpunkt ins andere Fahrzeug.
 
 ### Zeitsteuerung
 
@@ -97,6 +118,7 @@ src/
     scan.ts         Scan-Ereignisse (Arten, Herkunft)
     simulation.ts   Adapter „SimulierteScanner“: erzeugt nur Scan-Ereignisse
     lagebild.ts     Lage aus dem Ereignisstrom: Positionen, Behälter, Fortschritt, Prognosen
+    uebergabe.ts    Übergaben am Treffpunkt planen (abgeben, tauschen)
     route.ts        Routengeometrie und Zeitpläne entlang der Route
     sendungen.ts    Pakete je Stopp, Briefe geschätzt nach Haushalten, erfundene Adressen
   worker/           Optimierung im Web Worker
@@ -105,6 +127,7 @@ src/
                     Häuser und Behälter per Instancing, Basis, Fahrzeuge, Spuren, Kamera, Licht
   geraet/           Übertragung zum Fahrergerät (BroadcastChannel)
   ui/               Oberfläche: Leitstand, Panels, Ereignisstrom, Datenquellen,
+                    Umplanen (umplanen/: Vorschau, Andere Tour, Tauschen),
                     Geräte-Ansicht (fahrer/), Beschriftungen, Prüfansicht
 tests/              Vitest
 ```
@@ -155,6 +178,29 @@ Der Leitstand nutzt nur Daten, die bei der Arbeit ohnehin entstehen. Alles, was 
    Fahrzeug-Panel „Bitte melden“ senden → auf dem Gerät „Verstanden“ → im Leitstand steht
    „verstanden 10:03“.
 5. Menü → „Datenquellen“; dort lässt sich das Barcode-Etikett am Behälter ab- und anschalten.
+
+### Übergaben: auch nur aus Scans
+
+Eine Übergabe ist im Plan ein Schritt bei beiden Touren (Treffpunkt, wer was abgibt). Das
+Rechenmodell lässt den, der zuerst da ist, warten; der Optimierer sucht Treffpunkt und
+Zeitpunkt (`src/core/uebergabe.ts`). Die Simulation fährt beide Fahrzeuge hin und erzeugt beim
+Umladen die üblichen Scans im übernehmenden Fahrzeug (`BEHAELTER_VERLADEN` mit Etikett,
+sonst die `PAKET_IN_FAHRZEUG`-Scans der Pakete). Daran erkennt das Lagebild, dass die
+Übergabe stattgefunden hat – es gibt dafür kein eigenes Ereignis und keine neue Hardware.
+
+### So testest du Phase 5
+
+1. `npm run dev`, oben **Vorschläge**: „Tour 6 einsparen“ → **In 3D ansehen**. Die Uhr steht,
+   neue Routen und Δ-Werte erscheinen; Euro-Zahl antippen zeigt den Rechenweg. Verwerfen.
+2. Tour 1 → Behälter-Chip → **Umplanen → Andere Tour**: Liste mit Δ €/Tag, Ziel wählen,
+   Vorschau, **Übernehmen**. „Basis zeigen“: der Behälter steht jetzt bei der anderen Rampe.
+   ↶ macht es rückgängig (er rollt zurück).
+3. Laptop: „Basis zeigen“, einen Behälter mit der Maus auf ein Fahrzeug ziehen.
+   Handy: Behälter wählen → „Fahrzeug in 3D antippen“ → Fahrzeug antippen.
+4. Zeitleiste auf 10:00 → **Vorschläge**: „Überlastung Tour 1 abbauen“ mit Übergabe am
+   Treffpunkt → In 3D ansehen → Übernehmen → ▶. Zur Übergabezeit treffen sich beide
+   Fahrzeuge, der Behälter wechselt (Ereignisstrom: Ladescans im anderen Fahrzeug), die
+   Überstunden-Prognose sinkt.
 
 ### So testest du Phase 4
 

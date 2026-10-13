@@ -11,6 +11,7 @@ import { useAnsicht } from '../state/ansicht';
 import { simUhr, useLeitstand } from '../state/store';
 import { tourDerAuswahl } from './auswahl';
 import { S } from './koord';
+import { vorschauTouren } from './VorschauSzene';
 
 const HOEHE_REST = 0.3;
 const HOEHE_SPUR = 0.36;
@@ -80,9 +81,11 @@ function Spur({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
     }
     const f = lage.fahrzeug(tour.id);
     const route = f.route;
-    const gewaehlteTour = tourDerAuswahl(auswahl, ctx.tag, plan);
+    const vorschau = useLeitstand.getState().vorschau;
+    const inVorschau = vorschau ? vorschauTouren(vorschau).has(tour.id) : false;
+    const gewaehlteTour = vorschau ? null : tourDerAuswahl(auswahl, ctx.tag, plan);
     const gewaehlt = gewaehlteTour === tour.id;
-    const zurueckGestellt = gewaehlteTour !== null && !gewaehlt;
+    const zurueckGestellt = (gewaehlteTour !== null && !gewaehlt) || (!!vorschau && !inVorschau);
     const vorAbfahrt = f.phase === 'rampe' || f.phase === 'laedt';
     // vor der Abfahrt nur die geplante Route der ausgewählten Tour, nach der Rückkehr nur die Spur der ausgewählten
     const zeigeRest = route.punkte.length > 1 && ctx.tag.start[tour.id].besetzt && (f.phase === 'unterwegs' || (vorAbfahrt && gewaehlt));
@@ -132,7 +135,8 @@ function Spur({ tour, ctx }: { tour: Tour; ctx: Kontext }) {
     rest.material.dashSize = strich;
     rest.material.gapSize = strich * 0.7;
     rest.material.linewidth = gewaehlt ? 3 : 1.8;
-    rest.material.opacity = zurueckGestellt ? 0.25 : gewaehlt ? 0.95 : 0.65;
+    // in der Vorschau tritt die alte Route der betroffenen Touren zurück (die neue zeigt VorschauSzene)
+    rest.material.opacity = inVorschau ? 0.12 : zurueckGestellt ? 0.25 : gewaehlt ? 0.95 : 0.65;
     spur.material.linewidth = gewaehlt ? 5 : 3.5;
     spur.material.opacity = zurueckGestellt ? 0.35 : 1;
   });

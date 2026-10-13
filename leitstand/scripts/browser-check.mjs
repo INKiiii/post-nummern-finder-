@@ -73,16 +73,93 @@ try {
     const schmal = name === 'iphone';
 
     s('3D-Leitstand');
-    await page.goto(`http://localhost:${port}/`);
+    // ?debug macht Szene und Zustand für den Test greifbar (Drag & Drop)
+    await page.goto(`http://localhost:${port}/?debug`);
     await page.waitForSelector('canvas', { timeout: 30000 });
     await page.waitForTimeout(2500);
     await bild(page, `${name}-3d-uebersicht`);
     console.log(`[${name}] Bildrate (Software-Rendering, nur Anhaltspunkt): ${await fps(page)} fps`);
 
+    s('Vorschläge (Plan für den Tag)');
+    if (schmal) await page.locator('.blatt-tabs button', { hasText: 'Vorschläge' }).click();
+    else await page.getByRole('button', { name: /^Vorschläge/ }).click();
+    await page.waitForSelector('.vorschlag', { timeout: 20000 });
+    await page.locator('.vorschlag').first().getByRole('button', { name: 'In 3D ansehen' }).click();
+    await page.waitForSelector('.vorschau-karte');
+    await page.waitForTimeout(2200);
+    await bild(page, `${name}-vorschau`);
+    await page.getByRole('button', { name: 'Verwerfen', exact: true }).click();
+    if ((await page.locator('.vorschau-karte').count()) > 0) fehler.push(`[${name}] Vorschau lässt sich nicht verwerfen`);
+    if (schmal) await page.locator('.blatt-tabs button', { hasText: 'Touren' }).click();
+    else await page.getByRole('button', { name: /^Vorschläge/ }).click();
+
+    s('Andere Tour');
+    await page.locator('.tour-zeile:visible').first().click();
+    await page.waitForSelector('.panel .chips .chip');
+    await page.locator('.panel .chips .chip').first().click();
+    await page.waitForSelector('.optionen .option:not([disabled])');
+    await bild(page, `${name}-andere-tour`);
+    await page.locator('.optionen .option:not([disabled])').first().click();
+    await page.waitForSelector('.vorschau-karte');
+    await page.getByRole('button', { name: 'Übernehmen', exact: true }).last().click();
+    await page.waitForTimeout(400);
+    if ((await page.locator('button[aria-label="Rückgängig"]:not([disabled])').count()) === 0) fehler.push(`[${name}] Umplanung wurde nicht übernommen`);
+    await page.locator('button[aria-label="Rückgängig"]').click();
+    await page.keyboard.press('Escape');
+
     s('Basis zeigen');
+    if (schmal && (await page.locator('.panel-kopf button:visible').count())) await page.locator('.panel-kopf button:visible').first().click();
     await page.getByRole('button', { name: 'Basis zeigen' }).click();
     await page.waitForTimeout(2200);
     await bild(page, `${name}-3d-basis`);
+
+    if (!schmal) {
+      s('Behälter auf Fahrzeug ziehen');
+      const start = await page.evaluate(() => {
+        const st = window.__r3f;
+        const l = window.__leitstand.getState();
+        const ids = l.tag.behaelterIds;
+        let mesh = null;
+        st.scene.traverse((o) => {
+          if (o.isInstancedMesh && o.userData.behaelterIds) mesh = o;
+        });
+        const m = new st.camera.matrixWorld.constructor();
+        const folge = l.plan.touren.T1.schritte.map((x) => x.behaelterId);
+        mesh.getMatrixAt(ids.indexOf(folge[folge.length - 1]), m);
+        const v = new st.camera.position.constructor().setFromMatrixPosition(m);
+        v.y += 0.25;
+        v.project(st.camera);
+        const r = st.gl.domElement.getBoundingClientRect();
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+      });
+      const ziel = await page.locator('.fahrzeug-label').nth(3).boundingBox();
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(ziel.x + ziel.width / 2, ziel.y + ziel.height + 22, { steps: 12 });
+      await page.waitForTimeout(300);
+      await bild(page, `${name}-ziehen`);
+      await page.mouse.up();
+      await page.waitForSelector('.vorschau-karte', { timeout: 5000 }).catch(() => fehler.push(`[${name}] Ziehen auf ein Fahrzeug öffnet keine Vorschau`));
+      const titel = (await page.locator('.vorschau-karte h3').textContent().catch(() => '')) ?? '';
+      if (!titel.includes('Tour 4')) fehler.push(`[${name}] Ziehen: falsches Ziel („${titel}“)`);
+      await page.getByRole('button', { name: 'Verwerfen', exact: true }).click().catch(() => {});
+    } else {
+      s('Ziel-Fahrzeug antippen');
+      await page.locator('.tour-zeile:visible').first().click();
+      await page.waitForSelector('.panel .chips .chip');
+      await page.locator('.panel .chips .chip').first().click();
+      await page.getByRole('button', { name: 'Fahrzeug in 3D antippen' }).click();
+      await page.waitForSelector('.hinweis-leiste');
+      await page.getByRole('button', { name: 'Basis zeigen' }).click();
+      await page.waitForTimeout(2200);
+      const l3 = await page.locator('.fahrzeug-label').nth(2).boundingBox();
+      await page.mouse.click(l3.x + l3.width / 2, l3.y + l3.height + 18);
+      await page.waitForSelector('.vorschau-karte', { timeout: 5000 }).catch(() => fehler.push(`[${name}] Antippen eines Fahrzeugs öffnet keine Vorschau`));
+      await page.waitForTimeout(1500);
+      await bild(page, `${name}-ziel-angetippt`);
+      await page.getByRole('button', { name: 'Verwerfen', exact: true }).click().catch(() => {});
+      if (await page.locator('.panel-kopf button:visible').count()) await page.locator('.panel-kopf button:visible').first().click();
+    }
 
     s('Uhr läuft (Beladen)');
     if ((await page.locator('.regler-marken span').count()) < 3) fehler.push(`[${name}] Zeitleiste ohne Stundenmarken`);
@@ -95,9 +172,26 @@ try {
     await page.waitForTimeout(1200);
     await bild(page, `${name}-3d-abfahrt`);
 
-    s('Vormittag');
+    s('Vormittag: Übergabe-Vorschlag');
     await zeitStellen(page, 10 * 60);
     await page.waitForTimeout(500);
+    if (schmal) await page.locator('.blatt-tabs button', { hasText: 'Vorschläge' }).click();
+    else await page.getByRole('button', { name: /^Vorschläge/ }).click();
+    await page.waitForFunction(() => !window.__leitstand.getState().vorschlaegeLaden, null, { timeout: 20000 });
+    const mitUebergabe = page.locator('.vorschlag', { hasText: 'Übergabe' }).first();
+    if ((await mitUebergabe.count()) === 0) fehler.push(`[${name}] um 10:00 kein Vorschlag mit Übergabe`);
+    else {
+      await mitUebergabe.getByRole('button', { name: 'In 3D ansehen' }).click();
+      await page.waitForSelector('.vorschau-karte .uebergabe-zeile');
+      await page.waitForTimeout(2200);
+      await bild(page, `${name}-vorschau-uebergabe`);
+      await page.getByRole('button', { name: 'Übernehmen', exact: true }).last().click();
+      await page.waitForTimeout(300);
+    }
+    if (schmal) await page.locator('.blatt-tabs button', { hasText: 'Touren' }).click();
+    else await page.getByRole('button', { name: /^Vorschläge/ }).click();
+
+    s('Vormittag');
     await page.getByRole('button', { name: 'Menü' }).click();
     await page.getByRole('button', { name: 'Ganze Karte' }).click();
     await page.locator('button[aria-label="Start"]').first().click();

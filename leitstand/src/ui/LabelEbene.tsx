@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo } from 'react';
 import { G } from '../glossar';
+import { fmtDauer, fmtUhr } from '../core/format';
 import { gleicheAuswahl, useAnsicht } from '../state/ansicht';
 import { useLeitstand } from '../state/store';
 import { labelRef, setzeAnker } from '../szene/beschriftung';
@@ -12,6 +13,7 @@ export function LabelEbene() {
   const { ctx, lage, zeit } = useLeitstand();
   const lageVersion = useLeitstand((s) => s.lageVersion);
   const { kameraAbstand: abstand, auswahl, tipp } = useAnsicht();
+  const vorschau = useLeitstand((s) => s.vorschau);
 
   // feste Ankerpunkte
   useLayoutEffect(() => {
@@ -55,20 +57,45 @@ export function LabelEbene() {
       {fahrzeuge.map(({ t, p, besetzt }) => {
         const anBasis = p.phase !== 'unterwegs';
         const gewaehlt = gleicheAuswahl(auswahl, { art: 'fahrzeug', id: t.id });
-        const zeigen = !anBasis || abstand < 140 || gewaehlt;
+        const zeigen = !anBasis || abstand < 140 || gewaehlt || !!vorschau?.delta.betroffen.includes(t.id);
         const grau = !besetzt;
         return (
           <div key={t.id} ref={labelRef(`fz:${t.id}`)} data-aus={zeigen ? '0' : '1'} className="label">
             <div className={`fahrzeug-label ${gewaehlt ? 'aktiv' : ''}`} style={{ ['--tourfarbe' as string]: grau ? '#8a919b' : t.farbe }}>
               <span className="nr">{t.nr}</span>
               {labelText(p, zeit, besetzt)}
+              {vorschau && <VorschauDelta tourId={t.id} />}
             </div>
           </div>
         );
       })}
+      {vorschau?.uebergaben.map((u) => (
+        <div key={u.id} ref={labelRef(`vorschau:${u.id}`)} data-aus="0" className="label">
+          <div className="szene-label treff vorschau">
+            Übergabe {fmtUhr(u.zeit)} · {u.treffpunkt.name}
+          </div>
+        </div>
+      ))}
       <div ref={labelRef('tipp')} data-aus={tipp ? '0' : '1'} className="label">
         <div className="szene-tipp">{tipp}</div>
       </div>
     </div>
+  );
+}
+
+/** In der Vorschau: wie verschiebt sich das Tourende? */
+function VorschauDelta({ tourId }: { tourId: string }) {
+  const v = useLeitstand((s) => s.vorschau);
+  if (!v || !v.delta.betroffen.includes(tourId)) return null;
+  const a = v.alt.touren[tourId];
+  const n = v.neu.touren[tourId];
+  if (!n.aktiv) return <span className="label-delta gut">entfällt</span>;
+  const d = n.ende - a.ende;
+  if (Math.abs(d) < 0.5) return null;
+  return (
+    <span className={`label-delta ${d < 0 ? 'gut' : 'schlecht'}`}>
+      {d < 0 ? '−' : '+'}
+      {fmtDauer(Math.abs(d))}
+    </span>
   );
 }

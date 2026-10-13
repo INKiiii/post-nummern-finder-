@@ -13,6 +13,8 @@ import { LabelProjektor } from './LabelProjektor';
 import { LichtUndHimmel } from './LichtUndHimmel';
 import { Spuren } from './Spuren';
 import { Strassen } from './Strassen';
+import { VorschauSzene } from './VorschauSzene';
+import { Ziehen } from './Ziehen';
 
 /** Die 3D-Welt des Leitstands */
 export function Szene() {
@@ -32,7 +34,7 @@ export function Szene() {
       onCreated={(state) => {
         state.camera.lookAt(...start.ziel);
         // nur zur Fehlersuche: ?debug in der Adresse macht die Szene im Browser greifbar
-        if (window.location.search.includes('debug')) (window as unknown as { __r3f: unknown }).__r3f = state;
+        if (window.location.search.includes('debug')) Object.assign(window, { __r3f: state, __leitstand: useLeitstand, __ansicht: useAnsicht });
       }}
       onPointerMissed={() => waehlen(null)}
     >
@@ -46,6 +48,8 @@ export function Szene() {
       <Fahrzeuge ctx={ctx} />
       <Beschriftungen ctx={ctx} />
       <Spuren ctx={ctx} />
+      <VorschauSzene />
+      <Ziehen />
       <LabelProjektor />
     </Canvas>
   );
