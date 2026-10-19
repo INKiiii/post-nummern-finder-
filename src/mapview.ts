@@ -6,7 +6,7 @@
 // Zoomstufe (gemerkt). Keine Animationen; die Karte folgt nur dem (geglätteten) Straßenbezug.
 
 import { makeProjection, distanceM, normHouseNumber } from './core';
-import { AHEAD_LEVELS, CAR_Y, DEFAULT_LEVEL, NUMBER_FONT, edgePoint, labelOrder } from './maplabels';
+import { AHEAD_LEVELS, CAR_Y, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, edgePoint, groupSameHouse, joinHouseLabels, labelOrder } from './maplabels';
 import type { HouseNumber, Index, Street } from './types';
 import type { Fix } from './gps';
 
@@ -812,11 +812,14 @@ export class MapView {
     }
 
     // ---------- Hausnummern: an jedem Haus, ohne Überlappung, nach Vorrang ----------
+    // Die Nummer steht möglichst direkt auf dem Haus (statt Punkt + Nummer daneben): eindeutig
+    // und platzsparend, so passen auch dicht stehende Häuser. Nur wenn das nicht geht, steht sie
+    // neben dem Punkt. Nie über dem Punkt eines anderen Hauses (sonst ist sie nicht zuzuordnen).
     const gDots = el('g', {}, svg);
     const gNum = el('g', { class: 'numbers' }, svg);
     const targetNorm = target ? normHouseNumber(target.label) : '';
-    type Item = { n: HouseNumber; x: number; y: number; isFocus: boolean };
-    const cands: { item: Item; x: number; y: number }[] = [];
+    type Haus = { n: HouseNumber; x: number; y: number; isFocus: boolean; label: boolean };
+    const haeuser: { item: Haus; street: string; x: number; y: number }[] = [];
     let dots = 0;
     for (const s of shown) {
       for (const n of s.numbers) {
@@ -824,42 +827,141 @@ export class MapView {
         const [x, y] = toS(n.lat, n.lon);
         if (!visible(x, y)) continue;
         dots++;
-        const est = n.source === 'osm-interp';
-        if (n.user) el('rect', { x: x - 4.5, y: y - 4.5, width: 9, height: 9, class: 'hn hn-user' }, gDots);
-        else el('circle', { cx: x, cy: y, r: 4, class: est ? 'hn hn-est' : 'hn' }, gDots);
-        reserve(x - 5, y - 5, x + 5, y + 5);
         // Zielnummer steht schon in der Zielmarkierung
-        if (s === focus && targetNorm && n.norm === targetNorm) continue;
-        cands.push({ item: { n, x, y, isFocus: s === focus }, x, y });
+        const label = !(s === focus && targetNorm && n.norm === targetNorm);
+        const [wx, wy] = this.proj.toXY(n.lat, n.lon);
+        haeuser.push({ item: { n, x, y, isFocus: s === focus, label }, street: s.id, x: wx, y: wy });
       }
     }
+    // Mehrere Nummern an einem Haus (5, 5a, 5b …): eine gemeinsame Beschriftung
+    const gruppen = groupSameHouse(haeuser);
+    // Hauspunkte mit Gruppe: eine Beschriftung darf nur die Punkte ihres eigenen Hauses verdecken
+    const dotBoxes: { g: number; b: number[] }[] = [];
+    gruppen.forEach((g, i) => g.forEach((h) => dotBoxes.push({ g: i, b: [h.x - 5, h.y - 5, h.x + 5, h.y + 5] })));
+    const freeDots = (x0: number, y0: number, x1: number, y1: number, eigene = -1) =>
+      !dotBoxes.some(({ g, b: d }) => g !== eigene && x0 < d[2] && x1 > d[0] && y0 < d[3] && y1 > d[1]);
+    type Item = { gruppe: number; text: string; x: number; y: number; isFocus: boolean; est: boolean; user: boolean };
+    const cands = gruppen.flatMap((g, i) => {
+      const mit = g.filter((h) => h.label);
+      if (!mit.length) return [];
+      const it: Item = {
+        gruppe: i,
+        text: joinHouseLabels(mit.map((h) => (h.n.user ? `•${h.n.label}` : h.n.label))),
+        x: g.reduce((a, h) => a + h.x, 0) / g.length,
+        y: g.reduce((a, h) => a + h.y, 0) / g.length,
+        isFocus: g[0].isFocus,
+        est: mit.every((h) => h.n.source === 'osm-interp'),
+        user: mit.some((h) => h.n.user),
+      };
+      return [{ item: it, x: it.x, y: it.y, primary: it.isFocus }];
+    });
     const minZoomForAll = this.live ? 0.9 : 1.6;
     const ordered = labelOrder(cands, carS, [w / 2, h / 2]);
-    let labels = 0;
-    for (const it of ordered) {
-      if (labels > 260) break;
-      // Weit herausgezoomt: nur noch die nächsten Nummern beschriften
-      if (S < minZoomForAll && labels > 40) break;
-      const { n, x, y } = it;
-      const est = n.source === 'osm-interp';
-      // Selbst gesetzt: mit Punkt davor; geschätzt: kursiv (nicht nur Farbe)
-      const text = n.user ? `•${n.label}` : n.label;
-      const size = NUMBER_FONT;
-      const tw = text.length * size * 0.62;
-      const spots = [
-        { tx: x + 7, ty: y + 7, anchor: 'start', box: [x + 5, y + 7 - size, x + 9 + tw, y + 10] },
-        { tx: x - 7, ty: y + 7, anchor: 'end', box: [x - 9 - tw, y + 7 - size, x - 5, y + 10] },
-        { tx: x, ty: y - 8, anchor: 'middle', box: [x - tw / 2 - 2, y - 8 - size, x + tw / 2 + 2, y - 5] },
-        { tx: x, ty: y + 8 + size, anchor: 'middle', box: [x - tw / 2 - 2, y + 6, x + tw / 2 + 2, y + 11 + size] },
-      ];
-      const spot = spots.find((p) => p.box[0] > 0 && p.box[2] < w && p.box[1] > 0 && p.box[3] < h && free(p.box[0], p.box[1], p.box[2], p.box[3]));
-      if (!spot) continue;
+    /** Plätze: direkt auf dem Haus, sonst daneben (rechts, links, oben, unten, schräg oben) */
+    const spots = (x: number, y: number, tw: number, size: number) => [
+      { tx: x, ty: y + size * 0.36, anchor: 'middle', box: [x - tw / 2, y - size * 0.5, x + tw / 2, y + size * 0.5], auf: true },
+      { tx: x + 7, ty: y + 7, anchor: 'start', box: [x + 5, y + 7 - size, x + 9 + tw, y + 10], auf: false },
+      { tx: x - 7, ty: y + 7, anchor: 'end', box: [x - 9 - tw, y + 7 - size, x - 5, y + 10], auf: false },
+      { tx: x, ty: y - 8, anchor: 'middle', box: [x - tw / 2 - 1, y - 8 - size, x + tw / 2 + 1, y - 5], auf: false },
+      { tx: x, ty: y + 8 + size, anchor: 'middle', box: [x - tw / 2 - 1, y + 6, x + tw / 2 + 1, y + 11 + size], auf: false },
+      { tx: x + 5, ty: y - 7, anchor: 'start', box: [x + 3, y - 7 - size, x + 7 + tw, y - 5], auf: false },
+      { tx: x - 5, ty: y - 7, anchor: 'end', box: [x - 7 - tw, y - 7 - size, x - 3, y - 5], auf: false },
+    ];
+    // Nummern anderer Straßen (Eckhäuser, Nebenstraßen) etwas kleiner als die der eigenen Straße;
+    // bei Platzmangel etwas kleinere Schrift statt gar keiner Nummer
+    const groessen = [
+      { eigen: NUMBER_FONT, fremd: 17 },
+      { eigen: NUMBER_FONT_SMALL, fremd: 14 },
+    ];
+    type Platz = { it: Item; spot: ReturnType<typeof spots>[number]; size: number };
+    /**
+     * Verteilt die Nummern nach einer Reihenfolge von Versuchen (je Versuch: direkt aufs Haus
+     * oder daneben, Schriftgröße). Rechnet auf einer Kopie der belegten Flächen, damit sich
+     * zwei Anordnungen vergleichen lassen.
+     */
+    const platziere = (versuche: Array<{ auf: boolean | null; g: (typeof groessen)[number] }>, jeHaus: boolean): Platz[] => {
+      const belegt = placed.slice();
+      const frei = (b: number[]) => !belegt.some((q) => b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]);
+      const erg: Platz[] = [];
+      const fertig = new Set<Item>();
+      const versuch = (it: Item, v: (typeof versuche)[number]) => {
+        // selbst gesetzte Punkte behalten ihr eigenes Zeichen (Quadrat), die Nummer steht daneben
+        const size = it.isFocus ? v.g.eigen : v.g.fremd;
+        // Ziffern sind schmaler als ein Geviert; der Rand (Halo) gehört zum Kasten
+        const tw = it.text.length * size * 0.58 + 3;
+        const spot = spots(it.x, it.y, tw, size).find(
+          (p) =>
+            (v.auf === null || p.auf === v.auf) &&
+            !(p.auf && it.user) &&
+            p.box[0] > 0 && p.box[2] < w && p.box[1] > 0 && p.box[3] < h &&
+            frei(p.box) && freeDots(p.box[0], p.box[1], p.box[2], p.box[3], it.gruppe),
+        );
+        if (!spot) return false;
+        belegt.push(spot.box);
+        erg.push({ it, spot, size });
+        fertig.add(it);
+        return true;
+      };
+      const grenze = () => erg.length > 260 || (S < minZoomForAll && erg.length > 40);
+      if (jeHaus) {
+        // Haus für Haus nach Vorrang: der erste passende Versuch zählt
+        for (const it of ordered) {
+          if (grenze()) break;
+          for (const v of versuche) if (versuch(it, v)) break;
+        }
+      } else {
+        // Versuch für Versuch über alle Häuser (erst alle aufs Haus, dann daneben)
+        for (const v of versuche)
+          for (const it of ordered) {
+            if (grenze()) break;
+            if (!fertig.has(it)) versuch(it, v);
+          }
+      }
+      return erg;
+    };
+    // Zwei Anordnungen: (A) alle Nummern direkt aufs Haus, wo es geht – klar und ruhig;
+    // (B) Haus für Haus der erste freie Platz – bringt bei sehr dichter Bebauung mehr unter.
+    // Es gewinnt, was mehr Nummern zeigt (eigene Straße zählt doppelt); bei Gleichstand A.
+    const A = platziere(
+      [
+        { auf: true, g: groessen[0] },
+        { auf: true, g: groessen[1] },
+        { auf: false, g: groessen[0] },
+        { auf: false, g: groessen[1] },
+      ],
+      false,
+    );
+    const B = platziere(
+      [
+        { auf: null, g: groessen[0] },
+        { auf: null, g: groessen[1] },
+      ],
+      true,
+    );
+    const wert = (l: Platz[]) => l.reduce((a, p) => a + (p.it.isFocus ? 2 : 1) * (p.it.text.includes('–') ? 3 : p.it.text.split(',').length), 0);
+    const gewaehlt = wert(B) > wert(A) ? B : A;
+    const aufHaus = new Set<number>();
+    for (const { it, spot, size } of gewaehlt) {
       reserve(spot.box[0], spot.box[1], spot.box[2], spot.box[3]);
-      const cls = `hn-label${it.isFocus ? '' : ' hn-label-other'}${est ? ' hn-est-label' : ''}${n.user ? ' hn-user-label' : ''}`;
-      const t = el('text', { x: spot.tx, y: spot.ty, 'text-anchor': spot.anchor, class: cls }, gNum);
-      t.textContent = text;
-      labels++;
+      if (spot.auf) aufHaus.add(it.gruppe);
+      // Selbst gesetzt: mit Punkt davor; geschätzt: kursiv (nicht nur Farbe)
+      const cls = `hn-label${it.isFocus ? '' : ' hn-label-other'}${it.est ? ' hn-est-label' : ''}${it.user ? ' hn-user-label' : ''}`;
+      const attrs: Record<string, string | number> = { x: spot.tx, y: spot.ty, 'text-anchor': spot.anchor, class: cls };
+      if (size !== NUMBER_FONT) attrs.style = `font-size:${size}px`;
+      const t = el('text', attrs, gNum);
+      t.textContent = it.text;
     }
+    // Punkte nur für Häuser, deren Nummer nicht direkt auf dem Haus steht
+    gruppen.forEach((g, i) => {
+      if (aufHaus.has(i)) return;
+      for (const hs of g) {
+        const est = hs.n.source === 'osm-interp';
+        if (hs.n.user) el('rect', { x: hs.x - 4.5, y: hs.y - 4.5, width: 9, height: 9, class: 'hn hn-user' }, gDots);
+        else el('circle', { cx: hs.x, cy: hs.y, r: 4, class: est ? 'hn hn-est' : 'hn' }, gDots);
+      }
+    });
+    // Straßennamen meiden auch die Hauspunkte
+    const freeAll = (x0: number, y0: number, x1: number, y1: number) => free(x0, y0, x1, y1) && freeDots(x0, y0, x1, y1);
 
     // Straßennamen: sparsam, entlang der Straße, nie über Hausnummern, Ziel oder Fahrzeug
     const gLabels = el('g', { class: 'labels' }, svg);
@@ -870,7 +972,7 @@ export class MapView {
     let labelCount = 0;
     for (const st of named) {
       if (labelCount >= maxStreetLabels) break;
-      if (this.placeStreetLabel(st, st === focus, toS, w, h, free, reserve, gLabels, 16) || this.placeStreetLabel(st, st === focus, toS, w, h, free, reserve, gLabels, 13))
+      if (this.placeStreetLabel(st, st === focus, toS, w, h, freeAll, reserve, gLabels, 16) || this.placeStreetLabel(st, st === focus, toS, w, h, freeAll, reserve, gLabels, 13))
         labelCount++;
     }
     for (const n of neighbors) {

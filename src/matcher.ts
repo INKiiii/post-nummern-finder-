@@ -81,6 +81,8 @@ export class StreetMatcher {
   private pending: { id: string; count: number } | null = null;
   private sAnchor: number | null = null;
   private lastXY: [number, number] | null = null;
+  /** Letzte Positionen in Bewegung (Meter), neueste zuletzt – für die Richtung nach dem Abbiegen */
+  private hist: [number, number][] = [];
   private forcedId: string | null = null;
   /** Bevorzugte Straßen (Meine Tour) */
   preferred = new Set<string>();
@@ -111,6 +113,7 @@ export class StreetMatcher {
     this.pending = null;
     this.sAnchor = null;
     this.lastXY = null;
+    this.hist = [];
   }
 
   /** Linien einer Straße in Metern (zwischengespeichert). */
@@ -192,6 +195,7 @@ export class StreetMatcher {
       this.cur = null;
       this.lastXY = null;
       this.sAnchor = null;
+      this.hist = [];
     }
   }
 
@@ -224,6 +228,8 @@ export class StreetMatcher {
       }
     }
     this.lastXY = xy;
+    this.hist.push(xy);
+    if (this.hist.length > 8) this.hist.shift();
 
     // Kandidaten in der Nähe
     const maxD = Math.max(25, Math.min(60, acc * 1.5));
@@ -231,6 +237,9 @@ export class StreetMatcher {
     const padLon = pad / Math.cos((fix.lat * Math.PI) / 180);
     type Cand = NonNullable<ReturnType<StreetMatcher['candidate']>> & { score: number };
     const cands: Cand[] = [];
+    // Richtung für die Straßenwahl: GPS-Kurs bei Fahrt, sonst die Bewegung der letzten Meter
+    // (hilft beim langsamen Abbiegen, wenn der GPS-Kurs noch Unsinn liefert)
+    const kursWahl = reliableCourse ?? this.movementBearing(xy);
     for (const st of this.getIndex().streets.values()) {
       const b = st.bbox;
       if (!b || !st.lines.length) continue;
@@ -240,9 +249,9 @@ export class StreetMatcher {
       if (!c || c.dist > (st.id === this.forcedId ? Math.max(80, maxD) : maxD)) continue;
       let score = c.dist;
       if (this.preferred.size && !this.preferred.has(st.id)) score += 8;
-      if (reliableCourse !== null) {
+      if (kursWahl !== null) {
         const tb = bearingOf(c.tangent[0], c.tangent[1]);
-        score += 12 * Math.abs(Math.sin((angleDiff(reliableCourse, tb) * Math.PI) / 180));
+        score += 12 * Math.abs(Math.sin((angleDiff(kursWahl, tb) * Math.PI) / 180));
       }
       if (this.cur?.street && st.id === this.cur.street.id) score -= 6;
       // Von Hand gewählt: gilt, solange sie in Reichweite ist
@@ -322,15 +331,32 @@ export class StreetMatcher {
       }
     } else this.sAnchor = c.s;
 
-    // Kartenausrichtung: Straßenverlauf voraus (ruhig auch in Kurven)
-    let bearing = prev?.bearing ?? null;
     const g = this.geometry(c.street)!;
     const line = g.lines[c.line];
+    // Richtung noch offen (z. B. gerade abgebogen, langsam): aus den letzten Positionen –
+    // auch denen auf der vorigen Straße, sie liegen auf der neuen Linie an der Kreuzung
+    if (dir === 0) {
+      dir = this.dirFromHistory(line, c.s, acc);
+      if (dir !== 0) this.sAnchor = c.s;
+    }
+    // Neue Straße oder Richtung gerade erkannt: Karte sofort ausrichten (nicht langsam nachdrehen)
+    const frisch = dir !== 0 && (!sameLine || prev?.dir !== dir);
+
+    // Kartenausrichtung: Straßenverlauf voraus (ruhig auch in Kurven)
+    let bearing = prev?.bearing ?? null;
     if (dir !== 0 && c.dist <= 40) {
       const a = pointAtS(line, Math.max(0, Math.min(g.lengths[c.line], c.s - dir * 5))).point;
       const b = pointAtS(line, Math.max(0, Math.min(g.lengths[c.line], c.s + dir * 25))).point;
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 3) bearing = this.smooth(prev?.bearing ?? null, bearingOf(b[0] - a[0], b[1] - a[1]));
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 3) {
+        const voraus = bearingOf(b[0] - a[0], b[1] - a[1]);
+        bearing = frisch ? voraus : this.smooth(prev?.bearing ?? null, voraus);
+      }
     } else if (course !== null) bearing = this.smooth(prev?.bearing ?? null, course);
+    else {
+      // ohne Straßenrichtung und ohne Kurs: Richtung der Bewegung der letzten Meter
+      const mv = this.movementBearing(xy);
+      if (mv !== null) bearing = this.smooth(prev?.bearing ?? null, mv);
+    }
 
     const snapped = c.dist <= Math.max(12, Math.min(acc, 25));
     const pos = snapped ? (this.proj!.toLatLon(c.point[0], c.point[1]) as [number, number]) : (this.proj!.toLatLon(xy[0], xy[1]) as [number, number]);
@@ -348,6 +374,32 @@ export class StreetMatcher {
       snapped,
     };
     return this.cur;
+  }
+
+  /**
+   * Fahrtrichtung entlang einer Linie aus den letzten Positionen: Wie weit liegt die aktuelle
+   * Position (s) vor oder hinter den früheren, auf dieselbe Linie projiziert? Neueste zuerst;
+   * es zählt die erste, die deutlich (über das GPS-Rauschen) abweicht.
+   */
+  private dirFromHistory(line: number[][], sNow: number, acc: number): Dir {
+    if (!line || line.length < 2) return 0;
+    const min = Math.max(4, Math.min(acc, 20) * 0.5);
+    for (let i = this.hist.length - 2; i >= 0; i--) {
+      const r = projectOnLine(this.hist[i], line);
+      if (!r || r.dist > 60) continue;
+      const ds = sNow - r.s;
+      if (Math.abs(ds) >= min) return Math.sign(ds) as Dir;
+    }
+    return 0;
+  }
+
+  /** Richtung der Bewegung über die letzten Meter (mindestens 8 m), sonst null. */
+  private movementBearing(xy: [number, number]): number | null {
+    for (let i = this.hist.length - 2; i >= 0; i--) {
+      const [x, y] = this.hist[i];
+      if (Math.hypot(xy[0] - x, xy[1] - y) >= 8) return bearingOf(xy[0] - x, xy[1] - y);
+    }
+    return null;
   }
 
   /** Glättung gegen Zittern; Umkehr (große Änderung) wird sofort übernommen. */

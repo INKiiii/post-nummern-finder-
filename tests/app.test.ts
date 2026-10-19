@@ -4,7 +4,7 @@ import { nameWarning } from '../src/namecheck';
 import { formatDistance } from '../src/guidance';
 import { summarize } from '../src/houseinfo';
 import { mergeRecords, backupDue } from '../src/exportimport';
-import { edgePoint, labelOrder, AHEAD_LEVELS, DEFAULT_LEVEL, NUMBER_FONT } from '../src/maplabels';
+import { edgePoint, labelOrder, AHEAD_LEVELS, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, groupSameHouse, joinHouseLabels } from '../src/maplabels';
 
 describe('Zahlwörter', () => {
   it.each([
@@ -116,7 +116,32 @@ describe('Kartenbeschriftung und Zoom', () => {
     ];
     expect(labelOrder(cands, car, [200, 300])).toEqual(['ziel', 'voraus-nah', 'voraus-fern', 'hinten-nah', 'hinten-fern']);
   });
-  it('Standardausschnitt 80 m voraus, Schrift mindestens 18 px', () => {
+  it('Vorrang: eigene Straße vor Eckhäusern anderer Straßen (voraus und dahinter jeweils)', () => {
+    const car: [number, number] = [200, 400];
+    const cands = [
+      { item: 'eck-nah', x: 205, y: 380 },
+      { item: 'eigen-fern', x: 200, y: 150, primary: true },
+      { item: 'eigen-nah', x: 210, y: 350, primary: true },
+      { item: 'eigen-hinten', x: 200, y: 450, primary: true },
+      { item: 'eck-hinten', x: 200, y: 420 },
+    ];
+    expect(labelOrder(cands, car, [200, 300])).toEqual(['eigen-nah', 'eigen-fern', 'eck-nah', 'eigen-hinten', 'eck-hinten']);
+  });
+  it('Mehrere Nummern an einem Haus: eine Beschriftung', () => {
+    expect(joinHouseLabels(['5a', '5'])).toBe('5, 5a');
+    expect(joinHouseLabels(['5b', '5', '5a', '5c'])).toBe('5–5c');
+    expect(joinHouseLabels(['12', '12'])).toBe('12');
+    expect(joinHouseLabels(['10', '9'])).toBe('9, 10');
+    const g = groupSameHouse([
+      { item: '5', street: 'A', x: 0, y: 0 },
+      { item: '5a', street: 'A', x: 2, y: 1 },
+      { item: '7', street: 'A', x: 14, y: 0 },
+      { item: '1', street: 'B', x: 1, y: 0 }, // andere Straße, gleicher Punkt: eigene Beschriftung
+    ]);
+    expect(g).toEqual([['5', '5a'], ['7'], ['1']]);
+  });
+  it('Standardausschnitt 80 m voraus, Schrift mindestens 18 px (bei Platzmangel nicht unter 16 px)', () => {
+    expect(NUMBER_FONT_SMALL).toBeGreaterThanOrEqual(16);
     expect(AHEAD_LEVELS[DEFAULT_LEVEL]).toBe(80);
     expect(NUMBER_FONT).toBeGreaterThanOrEqual(18);
   });
