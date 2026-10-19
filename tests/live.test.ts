@@ -142,6 +142,31 @@ describe('Straßenbezug und Fahrtrichtung', () => {
     expect(parity(p.right.map((u) => u.n.label)).every((x) => x === 0)).toBe(true);
   });
 
+  it('Langsam abbiegen (Kurs unbrauchbar): Karte zeigt nach wenigen Metern in die neue Fahrtrichtung', () => {
+    for (const [speed, seed, maxM] of [
+      [2, 5, 12],
+      [1.2, 9, 12],
+      [6, 3, 12],
+    ] as const) {
+      const m = new StreetMatcher(() => index);
+      const fixes = drive([[-420, -3], [-302, -3], [-302, 120]], { speed, noise: 3, seed });
+      // Wegpunkt zu jedem Fix: nach dem Abbiegen liegt er auf x = -302, y steigt
+      let ab: number | null = null;
+      let y = -3;
+      for (const f of fixes) {
+        const r = m.update(f);
+        const [fx, fy] = proj.toXY(f.lat, f.lon);
+        if (Math.abs(fx + 302) < 4 && fy > y) y = fy;
+        if (y <= 2) continue;
+        const nord = r.bearing !== null && Math.abs(((r.bearing + 540) % 360) - 180) < 20;
+        if (nord && ab === null) ab = y + 3;
+        if (!nord) ab = null;
+      }
+      expect(ab, `Tempo ${speed} m/s`).not.toBeNull();
+      expect(ab!, `Tempo ${speed} m/s`).toBeLessThan(maxM + 4);
+    }
+  });
+
   it('Kurve: Ausrichtung folgt ruhig dem Straßenverlauf, Richtung bleibt', () => {
     const m = new StreetMatcher(() => index);
     const res = run(m, drive([[-100, -2], [0, -2], [400, 38], [520, 38]], { speed: 5 }));

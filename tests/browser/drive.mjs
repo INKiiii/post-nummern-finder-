@@ -183,6 +183,38 @@ try {
     await ctx.close();
   }
 
+  // 2b. Langsam abbiegen: Karte dreht sich mit; dicht bebaute Straße: Nummern stehen am Haus
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-420, -3], [-302, -3]], { speed: 5, step: 5 });
+    await drive(page, [[-302, -3], [-302, 18]], { speed: 2, step: 2 });
+    // Die neue Straße (hervorgehoben) läuft auf dem Bildschirm senkrecht: Fahrtrichtung oben
+    const winkel = await page.evaluate(() => {
+      const d = document.querySelector('.screen-live .map-svg .st-focus')?.getAttribute('d') ?? '';
+      const p = [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+      if (p.length < 2) return null;
+      const [a, b] = [p[0], p[p.length - 1]];
+      return Math.abs((Math.atan2(b[0] - a[0], b[1] - a[1]) * 180) / Math.PI);
+    });
+    const senkrecht = winkel !== null && (winkel < 15 || winkel > 165);
+    check('Langsam abgebogen (18 m): Karte dreht mit, Straße zeigt nach oben', (await text(page, '.lt-street')) === 'Blumenstraße' && senkrecht, `Winkel ${winkel?.toFixed(0)}°`);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    const z = await page.evaluate(() => {
+      const svg = document.querySelector('.screen-live .map-svg');
+      const r = svg.getBoundingClientRect();
+      const drin = (e) => { const b = e.getBoundingClientRect(); return b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom; };
+      const texte = [...svg.querySelectorAll('.numbers text')].filter(drin).map((t) => t.textContent);
+      return { texte, nummern: texte.reduce((a, t) => a + (t.includes('–') ? 3 : t.split(',').length), 0), punkte: [...svg.querySelectorAll('.hn')].filter(drin).length };
+    });
+    check('Dicht bebaut (Lindenhof): Nummern im Bild beschriftet, kaum Punkte ohne Nummer', z.nummern >= 26 && z.punkte <= 6, `${z.nummern} Nummern, ${z.punkte} Punkte`);
+    check('Mehrere Nummern an einem Haus zusammengefasst („33–33b“)', z.texte.includes('33–33b'));
+    await ctx.close();
+  }
+
   // 3. Haus in zweiter Reihe, Vorbeifahren, Eingabesperre
   {
     const { ctx, page } = await freshPage();
