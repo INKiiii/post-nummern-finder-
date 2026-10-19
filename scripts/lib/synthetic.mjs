@@ -150,6 +150,19 @@ export function makeSyntheticTown(origin = SYNTH_ORIGIN) {
   node(214, 120, addr('Reetweg', '2', '00002', 'Beispielhausen'));
   node(214, 150, addr('Reetweg', '4', '00002', 'Beispielhausen'));
 
+  // --- Lindenhof: dicht bebaut (Reihenhäuser alle 7 m, beide Seiten), einige Häuser mit
+  //     mehreren Nummern (9, 9a, 9b am selben Gebäude) – zum Prüfen der Beschriftung
+  way(line([[-1000, 300], [-700, 300]]), { highway: 'residential', name: 'Lindenhof' });
+  for (let n = 1; n <= 80; n++) {
+    const x = -990 + Math.floor((n - 1) / 2) * 7;
+    const y = 300 + (n % 2 ? 11 : -11);
+    node(x, y, addr('Lindenhof', String(n), '00001', 'Musterdorf'));
+    if (n === 9 || n === 21 || n === 33) {
+      node(x + 1, y + 1, addr('Lindenhof', `${n}a`, '00001', 'Musterdorf'));
+      node(x - 1, y + 1, addr('Lindenhof', `${n}b`, '00001', 'Musterdorf'));
+    }
+  }
+
   // --- "Am Deich": nur Adressen, keine Straßengeometrie ---
   node(-600, 120, addr('Am Deich', '1', '00001', 'Musterdorf'));
   node(-580, 120, addr('Am Deich', '3', '00001', 'Musterdorf'));
