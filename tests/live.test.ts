@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { townPackages } from './town.mjs';
 import { buildIndex } from '../src/core';
 import { StreetMatcher, type GpsInput, type Match } from '../src/matcher';
-import { upcomingNumbers, targetInfo } from '../src/preview';
+import { houseMarks, upcomingNumbers, targetInfo } from '../src/preview';
 import { findHouse, drivewayFor } from '../src/core';
 import { makeProjection } from '../src/core';
 import { SYNTH_ORIGIN } from '../scripts/lib/synthetic.mjs';
@@ -83,6 +83,23 @@ describe('Straßenbezug und Fahrtrichtung', () => {
     expect(p.left[0].ahead).toBeLessThanOrEqual(p.left[1].ahead);
     // Karte zeigt nach Osten (Fahrtrichtung)
     expect(Math.abs(((last.bearing! - 90 + 540) % 360) - 180)).toBeLessThan(10);
+  });
+
+  it('Karte: Häuser der aktuellen Straße mit Seite und Abstand, das nächste je Seite markiert', () => {
+    const m = new StreetMatcher(() => index);
+    const res = run(m, drive([[-900, -3], [-800, -3]], { speed: 6, noise: 2 }));
+    const last = res[res.length - 1];
+    const p = upcomingNumbers(m, last)!;
+    const marks = houseMarks(m, last, p)!;
+    const next = [...marks.entries()].filter(([, k]) => k.next);
+    // genau die beiden Nummern, die oben groß stehen
+    expect(next.map(([n]) => n).sort()).toEqual([p.left[0].n, p.right[0].n].sort());
+    expect(marks.get(p.left[0].n)!.side).toBe('left');
+    expect(marks.get(p.right[0].n)!.side).toBe('right');
+    // ungerade links, gerade rechts; Häuser hinter dem Fahrzeug haben negativen Abstand
+    for (const [n, k] of marks) if (n.num !== null) expect(k.side).toBe(n.num % 2 ? 'left' : 'right');
+    expect([...marks.values()].some((k) => k.ahead < -20)).toBe(true);
+    expect(houseMarks(m, null, null)).toBeNull();
   });
 
   it('Umkehr bei Schrittgeschwindigkeit: Seiten und Reihenfolge drehen sich mit', () => {

@@ -7,7 +7,8 @@
 //
 // Szenarien: lange Straße, Kurve, Kreuzung, Abbiegen, Umkehr (Schritttempo), Haus in zweiter
 // Reihe, fehlende Nummer, Straße über zwei PLZ-Gebiete, Vorbeifahren, Eingabesperre bei Fahrt,
-// Stillstand ohne Springen. Echte Geräte verhalten sich anders (GPS-Rauschen, iOS) – siehe README.
+// Stillstand ohne Springen, Fahrtansicht (gleiche Markierung oben und auf der Karte, Gleiten
+// zwischen zwei Positionen, kein Neuzeichnen im Stand). Echte Geräte verhalten sich anders (GPS-Rauschen, iOS) – siehe README.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -109,7 +110,7 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` – ${detail}` : ''}`);
 }
 const text = async (page, sel) => ((await page.locator(sel).first().textContent().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim();
-const nums = async (page, side) => (await text(page, `.lt-${side} .lt-nums`)).split('·').map((s) => s.trim()).filter((s) => s && s !== '–');
+const nums = async (page, side) => (await page.locator(`.lt-${side} .lt-num`).allTextContents()).map((s) => s.trim()).filter(Boolean);
 const parity = (list) => list.map((l) => Number.parseInt(l, 10) % 2);
 const ascending = (list) => list.every((v, i) => !i || Number.parseInt(v, 10) >= Number.parseInt(list[i - 1], 10));
 const descending = (list) => list.every((v, i) => !i || Number.parseInt(v, 10) <= Number.parseInt(list[i - 1], 10));
@@ -126,9 +127,13 @@ async function setTarget(page, nr) {
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const errors = [];
-async function freshPage() {
+/** Neue Seite; storage: Einstellungen vorab (z. B. Kartenansicht) */
+async function freshPage(storage = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 14 Pro'], viewport: { width: 393, height: 760 }, locale: 'de-DE', serviceWorkers: 'block' });
   await ctx.addInitScript(fakeGeolocation);
+  await ctx.addInitScript((st) => {
+    for (const [k, v] of Object.entries(st)) localStorage.setItem(k, v);
+  }, storage);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(BASE);
@@ -200,18 +205,99 @@ try {
     check('Langsam abgebogen (18 m): Karte dreht mit, Straße zeigt nach oben', (await text(page, '.lt-street')) === 'Blumenstraße' && senkrecht, `Winkel ${winkel?.toFixed(0)}°`);
     await ctx.close();
   }
+  // Dicht bebaut: flache Karte (80 m voraus) – jede Nummer im Bild; Navi-Ansicht – im Nahbereich
+  // (untere Hälfte des freien Bereichs) jede Nummer, weit voraus darf es enger werden
+  const zaehle = (page, nurUnten) =>
+    page.evaluate((unten) => {
+      // Sichtbar ist die Karte zwischen Kopf und Leiste (die Karte liegt unter beiden)
+      const svg = document.querySelector('.screen-live .map-svg');
+      const c = document.querySelector('.screen-live .map-canvas').getBoundingClientRect();
+      const top = document.querySelector('.live-top').getBoundingClientRect().bottom;
+      const bottom = document.querySelector('.live-bottom').getBoundingClientRect().top;
+      const r = { left: c.left, right: c.right, top: unten ? (top + bottom) / 2 : top, bottom };
+      const drin = (e) => { const b = e.getBoundingClientRect(); return b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom; };
+      const els = [...svg.querySelectorAll('.numbers text')].filter(drin);
+      const texte = els.map((t) => t.textContent);
+      // Punkt ohne Nummer: keine Beschriftung in 14 px Umkreis (sonst steht die Nummer daneben)
+      const boxen = els.map((t) => t.getBoundingClientRect());
+      const ohne = [...svg.querySelectorAll('.hn')].filter(drin).filter((d) => {
+        const b = d.getBoundingClientRect();
+        const x = b.left + b.width / 2;
+        const y = b.top + b.height / 2;
+        return !boxen.some((q) => x > q.left - 14 && x < q.right + 14 && y > q.top - 14 && y < q.bottom + 14);
+      }).length;
+      return { texte, nummern: texte.reduce((a, t) => a + (t.includes('–') ? 3 : t.split(',').length), 0), punkte: ohne };
+    }, nurUnten);
+  {
+    const { ctx, page } = await freshPage({ 'hnf-map-mode2': 'navi' });
+    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    const z = await zaehle(page, true);
+    check('Navi-Ansicht, dicht bebaut: im Nahbereich jede Nummer beschriftet', z.nummern >= 10 && z.punkte <= 1, `${z.nummern} Nummern, ${z.punkte} Punkte`);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await freshPage({ 'hnf-map-mode2': 'heading', 'hnf-map-level2': '3' });
+    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    const z = await zaehle(page, false);
+    check('Dicht bebaut (Lindenhof, flach): Nummern im Bild beschriftet, kaum Punkte ohne Nummer', z.nummern >= 26 && z.punkte <= 6, `${z.nummern} Nummern, ${z.punkte} Punkte`);
+    check('Mehrere Nummern an einem Haus zusammengefasst („33–33b“)', z.texte.includes('33–33b'));
+    await ctx.close();
+  }
+
+  // 2c. Fahrtansicht: nächstes Haus je Seite oben und auf der Karte gleich, Fahrzeug fest im freien
+  // Bereich, Karte gleitet zwischen zwei Positionen, im Stand wird nichts neu gezeichnet
   {
     const { ctx, page } = await freshPage();
-    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    await drive(page, [[-900, -3], [-800, -3]], { speed: 6, step: 6 });
     const z = await page.evaluate(() => {
-      const svg = document.querySelector('.screen-live .map-svg');
-      const r = svg.getBoundingClientRect();
-      const drin = (e) => { const b = e.getBoundingClientRect(); return b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom; };
-      const texte = [...svg.querySelectorAll('.numbers text')].filter(drin).map((t) => t.textContent);
-      return { texte, nummern: texte.reduce((a, t) => a + (t.includes('–') ? 3 : t.split(',').length), 0), punkte: [...svg.querySelectorAll('.hn')].filter(drin).length };
+      const t = (s) => document.querySelector(s)?.textContent?.trim() ?? '';
+      const car = document.querySelector('.map-car').getBoundingClientRect();
+      const top = document.querySelector('.live-top').getBoundingClientRect().bottom;
+      const bot = document.querySelector('.live-bottom').getBoundingClientRect().top;
+      return { kl: t('.lt-left .lt-next'), kr: t('.lt-right .lt-next'), ml: t('.hn-pill-l text'), mr: t('.hn-pill-r text'), cx: car.left + car.width / 2, cy: car.top + car.height / 2, top, bot, w: innerWidth };
     });
-    check('Dicht bebaut (Lindenhof): Nummern im Bild beschriftet, kaum Punkte ohne Nummer', z.nummern >= 26 && z.punkte <= 6, `${z.nummern} Nummern, ${z.punkte} Punkte`);
-    check('Mehrere Nummern an einem Haus zusammengefasst („33–33b“)', z.texte.includes('33–33b'));
+    check('Nächstes Haus je Seite: oben und auf der Karte gleich markiert', z.kl && z.kl === z.ml && z.kr && z.kr === z.mr, `oben ${z.kl}/${z.kr}, Karte ${z.ml}/${z.mr}`);
+    check('Fahrzeug im freien Kartenbereich (unten, mittig)', Math.abs(z.cx - z.w / 2) < 3 && z.cy > z.top + (z.bot - z.top) * 0.6 && z.cy < z.bot - 20, `x ${z.cx.toFixed(0)}, y ${z.cy.toFixed(0)} zwischen ${z.top.toFixed(0)} und ${z.bot.toFixed(0)}`);
+    // Echte Taktung: eine Position pro Sekunde, 6 m/s nach Osten
+    const fixAt = async (x) => {
+      const [lat, lon] = proj.toLatLon(x, -3);
+      await page.evaluate(([a, b]) => window.__fix(a, b, 5, 6, 90), [lat, lon]);
+    };
+    for (const x of [-794, -788]) {
+      await fixAt(x);
+      await page.waitForTimeout(1000);
+    }
+    await page.evaluate(() => {
+      const svg = document.querySelector('.screen-live .map-svg');
+      window.__renders = 0;
+      new MutationObserver(() => window.__renders++).observe(svg, { childList: true });
+    });
+    await fixAt(-782);
+    const glide = await page.evaluate(
+      () =>
+        new Promise((done) => {
+          const svg = document.querySelector('.screen-live .map-svg');
+          const tf = new Set();
+          const cars = [];
+          const t0 = performance.now();
+          const step = () => {
+            tf.add(svg.style.transform);
+            const r = document.querySelector('.map-car').getBoundingClientRect();
+            cars.push(r.top);
+            if (performance.now() - t0 < 600) requestAnimationFrame(step);
+            else done({ stufen: tf.size, carSpan: Math.max(...cars) - Math.min(...cars), renders: window.__renders });
+          };
+          requestAnimationFrame(step);
+        }),
+    );
+    check('Karte gleitet zwischen zwei Positionen (Fahrzeug bleibt stehen)', glide.stufen >= 10 && glide.carSpan < 1.5 && glide.renders <= 1, `${glide.stufen} Zwischenstellungen, Fahrzeug ±${glide.carSpan.toFixed(1)} px, ${glide.renders}× neu gezeichnet`);
+    // Anhalten: Die Vorausberechnung wird einmal zurückgenommen, danach steht alles
+    await stand(page, -782, -3, 4, 8);
+    await page.waitForTimeout(500);
+    await page.evaluate(() => (window.__renders = 0));
+    await stand(page, -782, -3, 12, 8);
+    const still = await page.evaluate(() => window.__renders);
+    check('Stillstand: Karte wird nicht neu gezeichnet (Akku)', still === 0, `${still}× neu gezeichnet`);
     await ctx.close();
   }
 
@@ -227,7 +313,11 @@ try {
     await drive(page, [[-450, -3], [-400, -3]], { speed: 1, step: 5 });
     check('Im Stand: „Nr. suchen“ wieder frei', !(await page.locator('.lb-search').isDisabled()));
     // Haus (2. Reihe) und Einfahrt sichtbar, nicht unter den Knöpfen
-    const box = await page.locator('.map-svg').boundingBox();
+    const box = await page.evaluate(() => {
+      const c = document.querySelector('.screen-live .map-canvas').getBoundingClientRect();
+      const top = document.querySelector('.live-top').getBoundingClientRect().bottom;
+      return { x: c.left, y: top, width: c.width, height: document.querySelector('.live-bottom').getBoundingClientRect().top - top };
+    });
     const t = await page.locator('circle.target').boundingBox();
     const j = await page.locator('circle.junction').boundingBox();
     const ctl = await page.locator('.map-ctrl').boundingBox();

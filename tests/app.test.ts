@@ -4,7 +4,7 @@ import { nameWarning } from '../src/namecheck';
 import { formatDistance } from '../src/guidance';
 import { summarize } from '../src/houseinfo';
 import { mergeRecords, backupDue } from '../src/exportimport';
-import { edgePoint, labelOrder, AHEAD_LEVELS, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, groupSameHouse, joinHouseLabels } from '../src/maplabels';
+import { edgePoint, labelOrder, AHEAD_LEVELS, AHEAD_LEVELS_NAVI, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, groupSameHouse, joinHouseLabels } from '../src/maplabels';
 
 describe('Zahlwörter', () => {
   it.each([
@@ -140,9 +140,11 @@ describe('Kartenbeschriftung und Zoom', () => {
     ]);
     expect(g).toEqual([['5', '5a'], ['7'], ['1']]);
   });
-  it('Standardausschnitt 80 m voraus, Schrift mindestens 18 px (bei Platzmangel nicht unter 16 px)', () => {
+  it('Standardausschnitt: flach 110 m, Navi 220 m voraus; Schrift mindestens 18 px (bei Platzmangel nicht unter 16 px)', () => {
     expect(NUMBER_FONT_SMALL).toBeGreaterThanOrEqual(16);
-    expect(AHEAD_LEVELS[DEFAULT_LEVEL]).toBe(80);
+    expect(AHEAD_LEVELS[DEFAULT_LEVEL]).toBe(110);
+    expect(AHEAD_LEVELS_NAVI[DEFAULT_LEVEL]).toBe(220);
+    expect(AHEAD_LEVELS_NAVI.length).toBe(AHEAD_LEVELS.length);
     expect(NUMBER_FONT).toBeGreaterThanOrEqual(18);
   });
   it('setzt den Randpfeil auf den Kartenrand', () => {
