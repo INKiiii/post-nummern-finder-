@@ -3,7 +3,7 @@
 /** Sicht voraus in Metern je Zoomstufe (Live-Karte). Standard: 80 m voraus, ~20 m zurück. */
 export const AHEAD_LEVELS = [30, 45, 60, 80, 110, 150, 220, 320, 500];
 export const DEFAULT_LEVEL = 3;
-/** Anteil der Kartenhöhe über dem Fahrzeug (Fahrzeug im unteren Drittel bzw. Viertel). */
+/** Lage des Fahrzeugs im freien Kartenbereich (zwischen Kopf und Leiste), von oben gezählt: unteres Viertel. */
 export const CAR_Y = 0.75;
 /** Schriftgröße der Hausnummern auf der Karte (px); bei Platzmangel etwas kleiner statt gar nicht. */
 export const NUMBER_FONT = 20;

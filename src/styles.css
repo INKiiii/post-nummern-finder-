@@ -1,6 +1,9 @@
 /* Design „Post“ (Schwarz/Gelb, kräftig). Hoher Kontrast, große Schrift, aus 50–70 cm lesbar.
    Hell/Dunkel über data-theme am <html> (automatisch nach Systemeinstellung oder fest gewählt).
-   Keine Animationen. Farbe ist nie das einzige Signal (immer auch Text oder Form). */
+   Keine verspielten Animationen: Nur die Live-Karte gleitet ruhig mit (wie ein Navi), damit das
+   Auge beim Hochschauen sofort wieder Fahrzeug und Häuser findet. Seitenfarben: links blau,
+   rechts orange (oben im Kopf und auf der Karte gleich). Farbe ist nie das einzige Signal
+   (immer auch Text oder Lage). */
 
 :root,
 :root[data-theme='dark'] {
@@ -23,15 +26,31 @@
   --danger: #ff5a5a;
   --warn-bg: #d70015;
   --ok: #2ee66b;
-  --map-bg: #0b0b0b;
-  --st: #4a4a4a;
-  --st-tour: #8c8c8c;
+  --map-bg: #101216;
+  --st: #353a42;
+  --st-tour: #5b626d;
   --st-focus: #ffcc00;
-  --outline: #3c3c3c;
+  --st-focus-case: #101216;
+  --st-label: #b9bfc8;
+  --outline: #2b2f36;
+  --bld: #1a1d22;
   --hn-dot: #c8c8c8;
   --hn-text: #fff;
-  --hn-other-text: #e2e2e2;
-  --hn-halo: #000;
+  --hn-other-text: #9ca3ad;
+  --hn-halo: #101216;
+  --hud-bg: rgba(18, 20, 24, 0.93);
+  --hud-line: rgba(255, 255, 255, 0.09);
+  --hud-card: rgba(255, 255, 255, 0.07);
+  --hud-text: #fff;
+  --hud-muted: #a9afb8;
+  --hud-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --left: #2f7bff;
+  --on-left: #fff;
+  --left-text: #8ab6ff;
+  --right: #ff8a1f;
+  --on-right: #1b0e00;
+  --right-text: #ffaf6b;
+  --car-halo: rgba(255, 255, 255, 0.16);
   --user: #3fd0ff;
   --toast-bg: #fff;
   --toast-text: #000;
@@ -51,15 +70,31 @@
   --card-border: #000;
   --danger: #c4001a;
   --ok: #0d8a3e;
-  --map-bg: #f6f5ef;
-  --st: #b9b9b0;
-  --st-tour: #75756d;
-  --st-focus: #e0a800;
-  --outline: #a3a39a;
+  --map-bg: #eeece6;
+  --st: #c6c3ba;
+  --st-tour: #98958c;
+  --st-focus: #ffc800;
+  --st-focus-case: #8c6f00;
+  --st-label: #45484d;
+  --outline: #c9c5ba;
+  --bld: #dfdcd3;
   --hn-dot: #333;
   --hn-text: #000;
-  --hn-other-text: #1e1e1e;
-  --hn-halo: #fff;
+  --hn-other-text: #575a5f;
+  --hn-halo: #eeece6;
+  --hud-bg: rgba(255, 255, 255, 0.95);
+  --hud-line: rgba(0, 0, 0, 0.1);
+  --hud-card: #f0f0ec;
+  --hud-text: #000;
+  --hud-muted: #50545a;
+  --hud-shadow: 0 8px 26px rgba(0, 0, 0, 0.2);
+  --left: #1d6cff;
+  --on-left: #fff;
+  --left-text: #0a55d6;
+  --right: #ff7a00;
+  --on-right: #1b0e00;
+  --right-text: #b04300;
+  --car-halo: rgba(0, 0, 0, 0.12);
   --user: #0058c7;
   --toast-bg: #000;
   --toast-text: #fff;
@@ -96,7 +131,7 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .screen-live > *:not(.map), .screen-newstreet > *:not(.map) { flex: 0 0 auto; }
 
 /* ---------- Kopfzeilen (gelb, in beiden Themen gleich: Schwarz auf Gelb) ---------- */
-.topbar, .head, .live-top {
+.topbar, .head {
   background: var(--yel);
   color: var(--on-yel);
   padding: calc(8px + env(safe-area-inset-top)) 12px 10px;
@@ -175,56 +210,101 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .big-text { font-size: 24px; font-weight: 800; }
 .warn-text { color: var(--danger); font-weight: 800; }
 
-/* ---------- Live: Kopf mit Straße und Vorschau ---------- */
-.live-top { padding-bottom: 8px; }
-.lt-row1 { display: flex; align-items: flex-start; gap: 8px; }
-.lt-name { flex: 1; min-width: 0; }
-.lt-street { font-size: 28px; font-weight: 900; line-height: 1.1; letter-spacing: -0.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lt-place { font-size: 14px; font-weight: 800; color: rgba(0, 0, 0, 0.7); min-height: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lt-gps {
-  flex: none; display: inline-flex; align-items: center; gap: 4px; margin-top: 3px;
-  font-size: 14px; font-weight: 800; padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.1);
+/* ---------- Live: Karte über den ganzen Bildschirm, Kopf und Leiste schweben darüber ---------- */
+#app.screen-live { position: relative; padding: 0; background: var(--map-bg); }
+.screen-live > .map { position: absolute; inset: 0; min-height: 0; }
+/* Fast deckend statt Weichzeichner dahinter: gleich gut lesbar, spart Akku beim Gleiten */
+.hud { background: var(--hud-bg); color: var(--hud-text); border: 1px solid var(--hud-line); box-shadow: var(--hud-shadow); }
+.live-top {
+  position: absolute; z-index: 5; top: calc(6px + env(safe-area-inset-top));
+  left: calc(8px + env(safe-area-inset-left)); right: calc(8px + env(safe-area-inset-right));
+  border-radius: 24px; padding: 10px;
 }
-.lt-gps.warn { background: #000; color: var(--yel); font-size: 15px; }
-.lt-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
-.lt-side { background: rgba(255, 255, 255, 0.55); border-radius: 14px; padding: 4px 10px 6px; min-width: 0; }
-.lt-right { text-align: right; }
-.lt-cap { font-size: 13px; font-weight: 900; letter-spacing: 0.5px; }
-.lt-nums { font-size: 30px; font-weight: 900; line-height: 1.1; white-space: nowrap; overflow: hidden; letter-spacing: -0.5px; }
-.lt-num.est { font-style: italic; font-weight: 700; }
+.lt-row1 { display: flex; align-items: center; gap: 10px; }
+/* Gelber Strich vor dem Namen = die gelbe Straße auf der Karte */
+.lt-name { flex: 1; min-width: 0; position: relative; padding-left: 14px; }
+.lt-name::before { content: ''; position: absolute; left: 2px; top: 3px; bottom: 3px; width: 5px; border-radius: 3px; background: var(--st-focus); }
+.lt-street { font-size: 26px; font-weight: 900; line-height: 1.12; letter-spacing: -0.4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lt-street.long { font-size: 22px; }
+.lt-place { font-size: 13px; font-weight: 700; color: var(--hud-muted); min-height: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-gps {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
+  font-size: 13px; font-weight: 800; background: var(--hud-card); color: var(--hud-muted);
+}
+.gps-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+.lt-gps.warn { background: var(--orange); color: #000; font-size: 14px; }
+.lt-preview { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.lt-side { background: var(--hud-card); border-radius: 18px; padding: 7px 10px 7px 15px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.lt-left { box-shadow: inset 5px 0 0 var(--left); }
+.lt-right { box-shadow: inset -5px 0 0 var(--right); padding: 7px 15px 7px 10px; align-items: flex-end; text-align: right; }
+.lt-cap { font-size: 13px; font-weight: 900; letter-spacing: 0.6px; line-height: 1.2; }
+.lt-left .lt-cap { color: var(--left-text); }
+.lt-right .lt-cap { color: var(--right-text); }
+.lt-main { display: flex; align-items: center; gap: 9px; min-width: 0; max-width: 100%; }
+.lt-right .lt-main { flex-direction: row-reverse; }
+/* Das nächste Haus: groß und farbig – auf der Karte steht es genauso */
+.lt-next {
+  font-size: 38px; font-weight: 900; line-height: 1; letter-spacing: -0.5px; white-space: nowrap;
+  padding: 4px 11px 5px; border-radius: 14px; flex: none;
+}
+.lt-left .lt-next { background: var(--left); color: var(--on-left); }
+.lt-right .lt-next { background: var(--right); color: var(--on-right); }
+.lt-dist { min-width: 0; overflow: hidden; text-overflow: clip; font-size: 17px; font-weight: 800; color: var(--hud-muted); white-space: nowrap; }
+.lt-dist.now { font-weight: 900; text-transform: uppercase; letter-spacing: 0.4px; }
+.lt-left .lt-dist.now { color: var(--left-text); }
+.lt-right .lt-dist.now { color: var(--right-text); }
+.lt-rest { font-size: 18px; font-weight: 800; line-height: 22px; min-height: 22px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-then { font-size: 13px; font-weight: 700; color: var(--hud-muted); }
+.lt-num.est { font-style: italic; }
 .lt-num.user { text-decoration: underline; text-decoration-thickness: 3px; }
-.lt-dot { margin: 0 3px; opacity: 0.5; }
-.lt-none { opacity: 0.45; }
-.lt-msg { margin-top: 6px; font-size: 17px; font-weight: 800; }
-.lt-msg-btn { border: 0; background: #000; color: var(--yel); border-radius: 14px; padding: 8px 12px; font-weight: 900; font-size: 17px; }
+.lt-dot { margin: 0 4px; opacity: 0.45; }
+.lt-none { font-size: 18px; font-weight: 800; color: var(--hud-muted); line-height: 47px; }
+.lt-msg { margin-top: 8px; font-size: 17px; font-weight: 800; }
+.lt-msg-btn { border: 0; background: var(--yel); color: #000; border-radius: 14px; padding: 8px 12px; font-weight: 900; font-size: 17px; }
 .live-top .loc-denied { margin-top: 8px; color: var(--text); }
 
-/* Ziel: weiße Karte mit Pfeil, Entfernung, Seite (kompakt, damit die Karte Platz behält) */
+/* Unten: Ziel und Knöpfe, direkt unter dem Fahrzeug */
+.live-bottom {
+  position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; pointer-events: none;
+  padding: 0 calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.live-bottom > * { pointer-events: auto; }
+
+/* Ziel: weiße Karte mit Pfeil, Entfernung, Seite und der Zielnummer */
 .dircard {
-  background: var(--card); color: var(--on-card); border: 2px solid var(--card-border);
-  border-radius: 22px; padding: 8px 10px; margin: 8px 10px 0;
+  background: var(--card); color: var(--on-card); border: 1px solid var(--hud-line);
+  border-radius: 24px; padding: 10px; box-shadow: var(--hud-shadow);
 }
 .lt-trow { display: flex; align-items: center; gap: 12px; }
-.dir-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; flex: none; background: #555; }
-.dir-right .dir-icon { background: var(--orange); }
-.dir-left .dir-icon { background: var(--blue); }
-.dir-here .dir-icon { background: var(--green); }
+.dir-icon { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; color: #fff; flex: none; background: #555; }
+.dir-right .dir-icon { background: var(--right); color: var(--on-right); }
+.dir-left .dir-icon { background: var(--left); }
+.dir-here .dir-icon { background: var(--green); color: #000; }
 .dir-other .dir-icon { background: #444; }
 .dir-text { flex: 1; min-width: 0; }
-.dircard .dist { font-size: 36px; font-weight: 900; line-height: 1; letter-spacing: -1px; white-space: nowrap; }
-.dircard .side { font-size: 18px; font-weight: 900; letter-spacing: 0.3px; color: #555; line-height: 1.15; }
+.dircard .dist { font-size: 34px; font-weight: 900; line-height: 1; letter-spacing: -1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dircard .dist.long { font-size: 26px; letter-spacing: -0.6px; }
+.dircard .side { font-size: 15px; font-weight: 900; letter-spacing: 0.3px; color: #555; line-height: 1.2; margin-top: 3px; }
 .dir-right .side { color: var(--orange-text); }
 .dir-left .side { color: var(--blue); }
 .dir-here .side { color: var(--green-text); }
+/* Zielnummer wie die Markierung auf der Karte: schwarz mit gelbem Ring */
+.goal-nr {
+  flex: none; min-width: 52px; max-width: 110px; height: 52px; padding: 0 10px; border-radius: 26px; display: grid; place-items: center; overflow: hidden;
+  background: #111; color: var(--yel); border: 4px solid var(--yel); font-size: 22px; font-weight: 900; line-height: 1; white-space: nowrap;
+}
+.goal-nr.est { border-style: dashed; font-style: italic; }
+.goal-street { align-self: center; font-size: 15px; font-weight: 900; margin-right: 2px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Vorbeigefahren: Warnfarbe, großer Text „Zurück … m“ */
 .dir-behind { background: var(--warn-bg); color: #fff; border-color: var(--warn-bg); }
 .dir-behind .dir-icon { background: #fff; color: var(--warn-bg); }
-.dir-behind .side { color: #fff; }
+.dir-behind .side, .dir-behind .goal-street { color: #fff; }
 .dir-behind .tag { border-color: rgba(255, 255, 255, 0.8); color: #fff; }
-.dir-behind .tag-w { background: #fff; color: #000; }
+.dir-behind .lt-info { border-color: #fff; color: #fff; }
 .lt-close { background: rgba(0, 0, 0, 0.08); color: inherit; width: 40px; height: 40px; }
 .dir-behind .lt-close { background: rgba(255, 255, 255, 0.2); }
-.tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .tag-list { display: contents; }
 .tag { border: 2px solid #999; border-radius: 10px; padding: 1px 8px; font-size: 14px; font-weight: 800; color: #333; background: transparent; }
 .tag-y { border-color: var(--orange); color: var(--orange-text); }
@@ -232,15 +312,35 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .lt-info { border-style: dashed; border-color: #000; color: #000; }
 .lt-info:not(.empty) { border-style: solid; text-align: left; }
 
-/* Leiste unten */
-.live-bar {
-  display: flex; gap: 8px; align-items: center; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-  background: var(--bg);
-}
-.live-bar .pill-btn { min-height: 58px; font-size: 21px; padding: 0 16px; }
+/* Leiste unten: schwebende Knöpfe */
+.live-bar { display: flex; gap: 8px; align-items: center; }
+.live-bar .pill-btn { min-height: 60px; font-size: 20px; padding: 0 16px; gap: 8px; box-shadow: var(--hud-shadow); }
+.live-bar .pill-btn.here { background: var(--hud-bg); color: var(--hud-text); }
+.live-bar .sq-btn { width: 60px; height: 60px; border-radius: 30px; background: var(--hud-bg); border: 1px solid var(--hud-line); color: var(--hud-text); box-shadow: var(--hud-shadow); }
 .lb-search { flex: 1; min-width: 0; }
 .lb-search span { overflow: hidden; text-overflow: ellipsis; }
 .lb-here { flex: none; }
+.live-bar .pill-btn.locked { opacity: 1; background: var(--hud-bg); color: var(--hud-muted); font-size: 18px; }
+.live-bar .pill-btn.here.locked { border-color: var(--hud-line); }
+.live-bar .pill-btn.here.locked .ic { color: var(--hud-muted); }
+
+/* Quer (Laptop, Tablet, Handy quer): Kopf und Ziel als Spalte links, rechts die Karte */
+@media (orientation: landscape) and (min-width: 600px) {
+  .live-top { right: auto; width: min(440px, 46vw); }
+  .live-bottom { right: auto; width: calc(min(440px, 46vw) + 16px); }
+}
+/* Handy quer: kompakter Kopf, damit Kopf und Ziel übereinander passen */
+@media (orientation: landscape) and (max-height: 500px) {
+  .live-top { padding: 6px 8px; }
+  .lt-place, .lt-rest { display: none; }
+  .lt-street { font-size: 21px; }
+  .lt-preview { margin-top: 6px; }
+  .lt-side { padding-top: 5px; padding-bottom: 6px; gap: 3px; }
+  .lt-next { font-size: 32px; }
+  .dircard .dist { font-size: 26px; }
+  .live-bar .pill-btn, .live-bar .sq-btn { min-height: 50px; height: 50px; }
+  .live-bar .sq-btn { width: 50px; }
+}
 
 /* Menü */
 .menu { gap: 8px; }
@@ -330,9 +430,31 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .map-bar button.mode { font-size: 18px; min-width: 92px; }
 .map-bar button.active { border-color: var(--yel); }
 .map-info { flex: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
-.map-ctrl { position: absolute; right: 8px; bottom: 54px; display: flex; flex-direction: column; gap: 8px; }
-.map-ctrl .sq-btn { width: 52px; height: 52px; background: var(--panel); opacity: 0.94; }
-.map-corner { position: absolute; right: 6px; bottom: 4px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; pointer-events: none; }
+/* Knöpfe oben rechts im freien Bereich: dort liegen nur weit entfernte Häuser, nicht die „jetzt“-Häuser neben dem Fahrzeug */
+.map-ctrl { position: absolute; z-index: 3; right: calc(10px + env(safe-area-inset-right)); top: calc(var(--map-top, 0px) + 8px); display: flex; flex-direction: column; gap: 10px; }
+.map-ctrl .sq-btn {
+  width: 50px; height: 50px; border-radius: 25px; background: var(--hud-bg); border: 1px solid var(--hud-line);
+  color: var(--hud-text); box-shadow: var(--hud-shadow);
+}
+.map-ctrl .sq-btn.accent { background: var(--yel); color: #000; border-color: var(--yel); }
+.map-corner {
+  position: absolute; z-index: 3; left: calc(var(--map-left, 0px) + 10px + env(safe-area-inset-left)); bottom: calc(var(--map-bottom, 0px) + 6px);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; pointer-events: none;
+}
+.map-live .map-svg { will-change: transform; }
+/* Fahrzeug: eigene Ebene über der Karte, gleitet mit */
+.map-car { position: absolute; z-index: 2; left: 0; top: 0; width: 52px; height: 52px; margin: -26px 0 0 -26px; pointer-events: none; will-change: transform; }
+.map-car svg { display: block; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5)); }
+.car-halo { fill: var(--car-halo); }
+.car-disc { fill: #fff; stroke: #111; stroke-width: 3; }
+.car-chev { fill: #111; }
+.car-pt { fill: #111; display: none; }
+.map-car.no-heading .car-chev { display: none; }
+.map-car.no-heading .car-pt { display: inline; }
+.map-acc {
+  position: absolute; z-index: 1; left: 0; top: 0; border-radius: 50%; pointer-events: none;
+  background: rgba(63, 208, 255, 0.12); border: 1.5px solid rgba(63, 208, 255, 0.45);
+}
 .map-scale {
   display: block; min-width: 30px; text-align: center; font-size: 13px; font-weight: 800; color: var(--text);
   border: 3px solid var(--text); border-top: 0; height: 16px; line-height: 12px;
@@ -341,8 +463,9 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .st { fill: none; stroke: var(--st); stroke-linecap: round; stroke-linejoin: round; }
 .st-tour { stroke: var(--st-tour); }
 .st-focus { stroke: var(--st-focus); }
+.st-focus-case { stroke: var(--st-focus-case); }
 .st-start { fill: var(--st-focus); }
-.bld-outline { fill: none; stroke: var(--outline); stroke-width: 1.2; }
+.bld-outline { fill: var(--bld); stroke: var(--outline); stroke-width: 1.2; }
 .hn { fill: var(--hn-dot); }
 .hn-est { fill: none; stroke: var(--hn-dot); stroke-width: 2; }
 .hn-user { fill: var(--user); }
@@ -351,23 +474,26 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
   stroke: var(--hn-halo); stroke-width: 6px; stroke-linejoin: round;
 }
 .hn-label-other { fill: var(--hn-other-text); font-weight: 800; }
+/* Schon vorbei: blasser; das nächste Haus je Seite: farbig hinterlegt wie oben im Kopf */
+.hn-passed { opacity: 0.38; }
+.hn-pill rect { stroke: var(--hn-halo); stroke-width: 2.5px; }
+.hn-pill-l rect { fill: var(--left); }
+.hn-pill-r rect { fill: var(--right); }
+.hn-pill text { font-size: 21px; font-weight: 900; }
+.hn-pill-l text { fill: var(--on-left); }
+.hn-pill-r text { fill: var(--on-right); }
 .hn-est-label { font-style: italic; font-weight: 700; }
 .hn-user-label { fill: var(--user); }
 .st-label {
-  fill: var(--text); font-size: 16px; font-weight: 800; text-anchor: middle; paint-order: stroke;
+  fill: var(--st-label); font-size: 15px; font-weight: 800; text-anchor: middle; paint-order: stroke;
   stroke: var(--map-bg); stroke-width: 4px; stroke-linejoin: round;
 }
 .st-label-focus { fill: #000; stroke: var(--st-focus); stroke-width: 3px; }
-.target { fill: #fff; stroke: var(--orange); stroke-width: 5; }
-.target-est { fill: none; stroke: var(--orange); stroke-width: 3; stroke-dasharray: 6 5; }
-.target-label { fill: #000; font-size: 19px; font-weight: 900; text-anchor: middle; }
+.target { fill: #111; stroke: var(--yel); stroke-width: 5; }
+.target-est { fill: none; stroke: var(--yel); stroke-width: 3; stroke-dasharray: 6 5; }
+.target-label { fill: var(--yel); font-size: 19px; font-weight: 900; text-anchor: middle; }
 .target-label-est { font-style: italic; }
 .nb { fill: none; stroke: var(--orange); stroke-width: 3; }
-.acc { fill: rgba(63, 208, 255, 0.13); stroke: rgba(63, 208, 255, 0.4); stroke-width: 1; }
-.car { fill: var(--yel); stroke: #000; stroke-width: 2.5; }
-.car-window { fill: #000; }
-.car-arrow { fill: var(--yel); stroke: #000; stroke-width: 1.5; }
-.car-dot { fill: var(--yel); stroke: #000; stroke-width: 3; }
 .draft { fill: none; stroke: var(--user); stroke-width: 5; stroke-dasharray: 10 6; }
 .draft-pt { fill: var(--user); stroke: #000; stroke-width: 2; }
 .drive { fill: none; stroke: var(--text); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 7; }

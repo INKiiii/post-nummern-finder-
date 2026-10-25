@@ -52,6 +52,32 @@ export function upcomingNumbers(matcher: StreetMatcher, m: Match | null, count =
   return out;
 }
 
+/** Lage eines Hauses der aktuellen Straße relativ zum Fahrzeug (für die Karte) */
+export interface HouseMark {
+  side: Side;
+  /** Meter voraus entlang der Straße (negativ: schon vorbei) */
+  ahead: number;
+  /** Nächstes Haus auf seiner Seite (steht oben groß) */
+  next: boolean;
+}
+
+/**
+ * Seite und Abstand aller Häuser der aktuellen Straße (Linie, auf der man fährt). Die beiden
+ * Häuser, die oben als nächste stehen, sind markiert: Die Karte hebt sie farbig hervor.
+ */
+export function houseMarks(matcher: StreetMatcher, m: Match | null, p: Preview | null): Map<HouseNumber, HouseMark> | null {
+  if (!m?.street || m.dir === 0) return null;
+  const next = new Set<HouseNumber>();
+  if (p?.left[0]) next.add(p.left[0].n);
+  if (p?.right[0]) next.add(p.right[0].n);
+  const out = new Map<HouseNumber, HouseMark>();
+  for (const x of matcher.numbersOnLines(m.street)) {
+    if (x.line !== m.line || x.dist > MAX_OFFSET) continue;
+    out.set(x.n, { side: sideOf(x.cross, m.dir), ahead: (x.s - m.s) * m.dir, next: next.has(x.n) });
+  }
+  return out;
+}
+
 export interface TargetInfo {
   /** ahead: noch vor einem; passed: vorbeigefahren; here: daneben; other: andere Straße; unknown: Richtung unklar */
   kind: 'ahead' | 'passed' | 'here' | 'other' | 'unknown';
