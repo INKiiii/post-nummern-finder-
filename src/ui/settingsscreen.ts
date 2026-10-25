@@ -64,7 +64,8 @@ export function settingsScreen(root: HTMLElement) {
       h('h2', null, 'Karte'),
       choice<MapMode>(
         [
-          ['heading', 'Fahrtrichtung oben'],
+          ['navi', 'Navi (Blick in Fahrtrichtung)'],
+          ['heading', 'Flach, Fahrtrichtung oben'],
           ['north', 'Norden oben'],
         ],
         savedMapMode(),

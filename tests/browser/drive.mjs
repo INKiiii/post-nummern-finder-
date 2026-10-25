@@ -127,9 +127,13 @@ async function setTarget(page, nr) {
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const errors = [];
-async function freshPage() {
+/** Neue Seite; storage: Einstellungen vorab (z. B. Kartenansicht) */
+async function freshPage(storage = {}) {
   const ctx = await browser.newContext({ ...devices['iPhone 14 Pro'], viewport: { width: 393, height: 760 }, locale: 'de-DE', serviceWorkers: 'block' });
   await ctx.addInitScript(fakeGeolocation);
+  await ctx.addInitScript((st) => {
+    for (const [k, v] of Object.entries(st)) localStorage.setItem(k, v);
+  }, storage);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(BASE);
@@ -201,19 +205,41 @@ try {
     check('Langsam abgebogen (18 m): Karte dreht mit, Straße zeigt nach oben', (await text(page, '.lt-street')) === 'Blumenstraße' && senkrecht, `Winkel ${winkel?.toFixed(0)}°`);
     await ctx.close();
   }
-  {
-    const { ctx, page } = await freshPage();
-    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
-    const z = await page.evaluate(() => {
+  // Dicht bebaut: flache Karte (80 m voraus) – jede Nummer im Bild; Navi-Ansicht – im Nahbereich
+  // (untere Hälfte des freien Bereichs) jede Nummer, weit voraus darf es enger werden
+  const zaehle = (page, nurUnten) =>
+    page.evaluate((unten) => {
       // Sichtbar ist die Karte zwischen Kopf und Leiste (die Karte liegt unter beiden)
       const svg = document.querySelector('.screen-live .map-svg');
       const c = document.querySelector('.screen-live .map-canvas').getBoundingClientRect();
-      const r = { left: c.left, right: c.right, top: document.querySelector('.live-top').getBoundingClientRect().bottom, bottom: document.querySelector('.live-bottom').getBoundingClientRect().top };
+      const top = document.querySelector('.live-top').getBoundingClientRect().bottom;
+      const bottom = document.querySelector('.live-bottom').getBoundingClientRect().top;
+      const r = { left: c.left, right: c.right, top: unten ? (top + bottom) / 2 : top, bottom };
       const drin = (e) => { const b = e.getBoundingClientRect(); return b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom; };
-      const texte = [...svg.querySelectorAll('.numbers text')].filter(drin).map((t) => t.textContent);
-      return { texte, nummern: texte.reduce((a, t) => a + (t.includes('–') ? 3 : t.split(',').length), 0), punkte: [...svg.querySelectorAll('.hn')].filter(drin).length };
-    });
-    check('Dicht bebaut (Lindenhof): Nummern im Bild beschriftet, kaum Punkte ohne Nummer', z.nummern >= 26 && z.punkte <= 6, `${z.nummern} Nummern, ${z.punkte} Punkte`);
+      const els = [...svg.querySelectorAll('.numbers text')].filter(drin);
+      const texte = els.map((t) => t.textContent);
+      // Punkt ohne Nummer: keine Beschriftung in 14 px Umkreis (sonst steht die Nummer daneben)
+      const boxen = els.map((t) => t.getBoundingClientRect());
+      const ohne = [...svg.querySelectorAll('.hn')].filter(drin).filter((d) => {
+        const b = d.getBoundingClientRect();
+        const x = b.left + b.width / 2;
+        const y = b.top + b.height / 2;
+        return !boxen.some((q) => x > q.left - 14 && x < q.right + 14 && y > q.top - 14 && y < q.bottom + 14);
+      }).length;
+      return { texte, nummern: texte.reduce((a, t) => a + (t.includes('–') ? 3 : t.split(',').length), 0), punkte: ohne };
+    }, nurUnten);
+  {
+    const { ctx, page } = await freshPage({ 'hnf-map-mode2': 'navi' });
+    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    const z = await zaehle(page, true);
+    check('Navi-Ansicht, dicht bebaut: im Nahbereich jede Nummer beschriftet', z.nummern >= 10 && z.punkte <= 1, `${z.nummern} Nummern, ${z.punkte} Punkte`);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await freshPage({ 'hnf-map-mode2': 'heading', 'hnf-map-level2': '3' });
+    await drive(page, [[-1000, 297], [-870, 297]], { speed: 2, step: 2 });
+    const z = await zaehle(page, false);
+    check('Dicht bebaut (Lindenhof, flach): Nummern im Bild beschriftet, kaum Punkte ohne Nummer', z.nummern >= 26 && z.punkte <= 6, `${z.nummern} Nummern, ${z.punkte} Punkte`);
     check('Mehrere Nummern an einem Haus zusammengefasst („33–33b“)', z.texte.includes('33–33b'));
     await ctx.close();
   }

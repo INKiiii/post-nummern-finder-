@@ -437,6 +437,9 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
   color: var(--hud-text); box-shadow: var(--hud-shadow);
 }
 .map-ctrl .sq-btn.accent { background: var(--yel); color: #000; border-color: var(--yel); }
+.map-ctrl .view-btn { font-size: 17px; font-weight: 900; letter-spacing: 0.3px; }
+/* Navi-Ansicht: ein Maßstab wäre irreführend (er ändert sich mit der Entfernung) */
+.map-corner.navi .map-scale { display: none; }
 .map-corner {
   position: absolute; z-index: 3; left: calc(var(--map-left, 0px) + 10px + env(safe-area-inset-left)); bottom: calc(var(--map-bottom, 0px) + 6px);
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; pointer-events: none;

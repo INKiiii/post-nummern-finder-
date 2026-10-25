@@ -1,10 +1,15 @@
 // Regeln für Ausschnitt und Beschriftung der Karte (ohne DOM, damit testbar).
 
-/** Sicht voraus in Metern je Zoomstufe (Live-Karte). Standard: 80 m voraus, ~20 m zurück. */
+/** Sicht voraus in Metern je Zoomstufe, flache Karte. Standard: 110 m voraus. */
 export const AHEAD_LEVELS = [30, 45, 60, 80, 110, 150, 220, 320, 500];
-export const DEFAULT_LEVEL = 3;
+/** Sicht voraus in Metern je Zoomstufe, Navi-Ansicht (geneigt). Standard: 220 m voraus – nah am Fahrzeug bleibt
+ * dabei auch bei dichter Bebauung (alle 7 m ein Haus) jede Nummer lesbar. */
+export const AHEAD_LEVELS_NAVI = [80, 110, 140, 180, 220, 280, 360, 500, 750];
+export const DEFAULT_LEVEL = 4;
 /** Lage des Fahrzeugs im freien Kartenbereich (zwischen Kopf und Leiste), von oben gezählt: unteres Viertel. */
 export const CAR_Y = 0.75;
+/** Navi-Ansicht: Fahrzeug etwas tiefer, damit mehr voraus zu sehen ist. */
+export const CAR_Y_NAVI = 0.8;
 /** Schriftgröße der Hausnummern auf der Karte (px); bei Platzmangel etwas kleiner statt gar nicht. */
 export const NUMBER_FONT = 20;
 export const NUMBER_FONT_SMALL = 16;

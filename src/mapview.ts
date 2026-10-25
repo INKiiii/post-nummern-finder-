@@ -7,17 +7,24 @@
 // verschiebt und dreht der Browser nur das fertige Bild (Grafikchip, akkuschonend). Das Fahrzeug
 // wird leicht vorausberechnet (Tempo × Zeit bis zur nächsten Position), damit es nicht
 // hinterherhinkt. Bei „Bewegung reduzieren“ (Systemeinstellung) springt die Karte wie früher.
+//
+// Navi-Ansicht (Standard): dieselbe flache Karte, nach hinten gekippt (src/perspective.ts) – der
+// Blick geht von hinter dem Fahrzeug weit in Fahrtrichtung. Gezeichnet wird weiterhin flach; die
+// Neigung rechnet der Browser als eine Matrix. Beschriftungen, Ziel und Pfeile werden an ihrer
+// Stelle entzerrt gezeichnet und stehen deshalb aufrecht wie Schilder.
 
 import { makeProjection, distanceM, normHouseNumber } from './core';
-import { AHEAD_LEVELS, CAR_Y, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, edgePoint, groupSameHouse, joinHouseLabels, labelOrder } from './maplabels';
-import { angleDiff, covers, lerpCam, reanchor, sameCam, screenMatrix, toScreen, toWorld, type Cam } from './camera';
+import { AHEAD_LEVELS, AHEAD_LEVELS_NAVI, CAR_Y, CAR_Y_NAVI, DEFAULT_LEVEL, NUMBER_FONT, NUMBER_FONT_SMALL, edgePoint, groupSameHouse, joinHouseLabels, labelOrder } from './maplabels';
+import { angleDiff, covers, coversPoints, lerpCam, reanchor, sameCam, screenMatrix, toScreen, toWorld, type Cam } from './camera';
+import { affine, factorScreen, homography, matrix3d, mul3, perspFor, project, unproject, unskew, type Persp } from './perspective';
 import type { HouseNumber, Index, Street } from './types';
 import type { Fix } from './gps';
 import type { HouseMark, Side } from './preview';
 
 const NS = 'http://www.w3.org/2000/svg';
-const MODE_KEY = 'hnf-map-mode';
-const LEVEL_KEY = 'hnf-map-level';
+const MODE_KEY = 'hnf-map-mode2';
+const OLD_MODE_KEY = 'hnf-map-mode';
+const LEVEL_KEY = 'hnf-map-level2';
 /** Rand rund um den sichtbaren Bereich, der mitgezeichnet wird (px): Platz zum Gleiten */
 const OVERSCAN = 140;
 /** Vorausberechnung: Anteil der Strecke bis zur nächsten Position */
@@ -29,7 +36,8 @@ export const PASSED_DIM_M = 8;
 /** Schrift der Markierung „nächstes Haus“ je Straßenseite */
 export const PILL_FONT = 21;
 
-export type MapMode = 'heading' | 'north';
+/** navi: geneigt, Blick in Fahrtrichtung · heading: flach, Fahrtrichtung oben · north: Norden oben */
+export type MapMode = 'navi' | 'heading' | 'north';
 
 export interface MapTarget {
   lat: number;
@@ -100,7 +108,10 @@ function save(key: string, v: string) {
 }
 
 export function savedMapMode(): MapMode {
-  return load(MODE_KEY) === 'north' ? 'north' : 'heading';
+  const m = load(MODE_KEY);
+  if (m === 'navi' || m === 'heading' || m === 'north') return m;
+  // Wer früher „Norden oben“ gewählt hatte, behält das; sonst Navi-Ansicht
+  return load(OLD_MODE_KEY) === 'north' ? 'north' : 'navi';
 }
 export function setSavedMapMode(m: MapMode) {
   save(MODE_KEY, m);
@@ -158,6 +169,13 @@ export class MapView {
   private raf = 0;
   /** Platz jeder Nummer im letzten Bild: beim Fahren bleibt sie möglichst dort (ruhiges Bild) */
   private memo = new Map<string, { k: number; sz: number }>();
+  /** Neigung, wie sie gerade angezeigt wird: gleitet, wenn sich Kopf oder Leiste in der Höhe ändern */
+  private pv: Persp | null = null;
+  private pvAnim: { from: Persp; to: Persp; t0: number } | null = null;
+  /** Neigung, für die zuletzt gezeichnet wurde (Beschriftungen sind dafür entzerrt) */
+  private drawnP: Persp | null = null;
+  /** Zuletzt gewählte Anordnung der Nummern (A, B oder C, siehe render) */
+  private layout = 'A';
   private data: MapData = {
     index: null,
     focus: null,
@@ -195,7 +213,7 @@ export class MapView {
     if (opts.allowHeading === false) this.mode = 'north';
     const stored = load(LEVEL_KEY);
     const lv = stored === null ? NaN : Number(stored);
-    if (Number.isInteger(lv) && lv >= 0 && lv < AHEAD_LEVELS.length) this.level = lv;
+    if (Number.isInteger(lv) && lv >= 0 && lv < AHEAD_LEVELS_NAVI.length) this.level = lv;
     this.root = document.createElement('div');
     this.root.className = 'map' + (this.live ? ' map-live' : '');
     this.canvas = document.createElement('div');
@@ -248,7 +266,7 @@ export class MapView {
       btn('−', 'Verkleinern', () => this.zoom(1 / 1.6));
       btn('+', 'Vergrößern', () => this.zoom(1.6));
       this.centerBtn = btn('◎', 'Ziel und Position zeigen', () => this.recenter());
-      this.modeBtn = btn('', 'Kartenausrichtung umschalten', () => this.setMode(this.mode === 'heading' ? 'north' : 'heading'));
+      this.modeBtn = btn('', 'Kartenausrichtung umschalten', () => this.setMode(this.mode === 'north' ? 'heading' : 'north'));
       this.modeBtn.classList.add('mode');
       if (opts.allowHeading === false) this.modeBtn.hidden = true;
       const info = document.createElement('div');
@@ -296,7 +314,7 @@ export class MapView {
 
   /** Live-Zoom: eine Stufe näher (+1) oder weiter (-1); wird gemerkt. */
   zoomStep(delta: 1 | -1) {
-    this.level = Math.max(0, Math.min(AHEAD_LEVELS.length - 1, this.level - delta));
+    this.level = Math.max(0, Math.min(this.levels.length - 1, this.level - delta));
     save(LEVEL_KEY, String(this.level));
     this.setAuto(true);
     this.requestFit(280);
@@ -304,7 +322,58 @@ export class MapView {
 
   /** Sicht voraus der aktuellen Zoomstufe in Metern */
   get aheadMeters() {
-    return AHEAD_LEVELS[this.level];
+    return this.levels[this.level];
+  }
+
+  private get levels() {
+    return this.navi ? AHEAD_LEVELS_NAVI : AHEAD_LEVELS;
+  }
+
+  /** Navi-Ansicht aktiv (nur Live-Karte mit Fahrtrichtung) */
+  get navi() {
+    return this.live && this.mode === 'navi';
+  }
+
+  /** Neigung der Navi-Ansicht für die aktuelle Fläche, sonst null (flach) */
+  private persp(w: number): Persp | null {
+    if (!this.navi) return null;
+    const top = this.insets.top;
+    const bottom = Math.max(top + 80, this.size().h - this.insets.bottom);
+    return perspFor(top, bottom, Math.min(this.insets.left, w - 120), w);
+  }
+
+  /** Bildschirm → flache Kartenkoordinaten (in der Navi-Ansicht durch die Neigung zurück) */
+  private flat(x: number, y: number): [number, number] {
+    const P = this.navi ? (this.pv ?? this.persp(this.size().w)) : null;
+    return P ? unproject(P, x, y) : [x, y];
+  }
+
+  /**
+   * Gezeichneter Bereich (flache Koordinaten) und der Ausschnitt, der sichtbar sein muss. In der
+   * Navi-Ansicht reicht der Ausschnitt flach weit nach oben und ist oben breiter (Trapez).
+   */
+  private extent(w: number, h: number, P: Persp | null) {
+    const ov = this.ov;
+    if (!P) {
+      const need: Array<[number, number]> = [
+        [0, 0],
+        [w, 0],
+        [0, h],
+        [w, h],
+      ];
+      return { ovX: ov, ovTop: ov, need };
+    }
+    const left = Math.min(this.insets.left, w - 120);
+    const yTop = Math.max(-ov, this.insets.top - 30);
+    const need: Array<[number, number]> = [
+      unproject(P, left - 10, yTop),
+      unproject(P, w + 10, yTop),
+      unproject(P, left - 10, h),
+      unproject(P, w + 10, h),
+    ];
+    const ovTop = Math.min(2400, Math.max(ov, Math.ceil(-Math.min(...need.map((p) => p[1]))) + ov));
+    const ovX = Math.min(1200, Math.max(ov, Math.ceil(Math.max(...need.map((p) => Math.max(-p[0], p[0] - w)))) + 60));
+    return { ovX, ovTop, need };
   }
 
   recenter() {
@@ -337,8 +406,8 @@ export class MapView {
 
   private updateModeBtn() {
     if (!this.modeBtn) return;
-    this.modeBtn.textContent = this.mode === 'heading' ? '▲ Fahrt' : 'N ↑';
-    this.modeBtn.title = this.mode === 'heading' ? 'Fahrtrichtung oben – tippen für Norden oben' : 'Norden oben – tippen für Fahrtrichtung oben';
+    this.modeBtn.textContent = this.mode !== 'north' ? '▲ Fahrt' : 'N ↑';
+    this.modeBtn.title = this.mode !== 'north' ? 'Fahrtrichtung oben – tippen für Norden oben' : 'Norden oben – tippen für Fahrtrichtung oben';
   }
 
   update(partial: Partial<MapData>) {
@@ -412,7 +481,7 @@ export class MapView {
   }
 
   private screenToLatLon(sx: number, sy: number): [number, number] {
-    const [x, y] = toWorld(this.view, sx, sy);
+    const [x, y] = toWorld(this.view, ...this.flat(sx, sy));
     return this.proj.toLatLon(x, y) as [number, number];
   }
 
@@ -477,8 +546,10 @@ export class MapView {
       this.view = this.cam;
       return;
     }
-    // Großer Richtungswechsel (Abbiegen): Drehung sanft an- und auslaufen lassen
-    const turn = Math.abs(angleDiff(this.view.rot, this.cam.rot)) > 20;
+    // Großer Richtungswechsel (Abbiegen): Drehung sanft an- und auslaufen lassen – aber nur,
+    // wenn gerade nichts gleitet. Kommt die nächste Position mitten im Gleiten, geht es ohne
+    // erneutes Anlaufen weiter (sonst käme die Karte bei häufigen Positionen nie an).
+    const turn = !this.anim && Math.abs(angleDiff(this.view.rot, this.cam.rot)) > 20;
     this.anim = { from: reanchor(this.view, this.cam.sx, this.cam.sy), t0, dur: turn ? Math.max(dur, 900) : dur, linear, turn };
   }
 
@@ -511,30 +582,47 @@ export class MapView {
     else if (goal && goal.bearing !== null && Number.isFinite(goal.bearing)) rot = goal.bearing;
     const T = target ? this.proj.toXY(target.lat, target.lon) : null;
     const J = driveway?.line.length ? this.proj.toXY(driveway.line[0][0], driveway.line[0][1]) : null;
+    const P = this.persp(w);
+    // Bildschirmlage eines Weltpunkts unter einer Ansicht (in der Navi-Ansicht mit Neigung)
+    const scr = (c: Cam, x: number, y: number): [number, number] => {
+      const q = toScreen(c, x, y);
+      return P ? project(P, q[0], q[1]) : q;
+    };
     if (goal && (this.live || T || focus)) {
       const U: [number, number] = [goal.x, goal.y];
-      const carY = this.live ? top + vh * CAR_Y : top + vh / 2;
-      const ahead = this.live ? AHEAD_LEVELS[this.level] : 120;
-      const base = Math.min(14, Math.max(0.05, (carY - top) / ahead));
+      const ahead = this.live ? this.levels[this.level] : 120;
+      let carY: number;
+      let base: number;
+      if (P) {
+        // Navi: Fahrzeug tief im freien Bereich; „ahead“ Meter bis zur Unterkante des Kopfes
+        carY = unproject(P, cx, top + vh * CAR_Y_NAVI)[1];
+        base = (carY - unproject(P, cx, top)[1]) / ahead;
+      } else {
+        carY = this.live ? top + vh * CAR_Y : top + vh / 2;
+        base = (carY - top) / ahead;
+      }
+      base = Math.min(14, Math.max(0.05, base));
+      const carScreenY = P ? project(P, cx, carY)[1] : carY;
       let cam: Cam = { ax: U[0], ay: U[1], sx: cx, sy: carY, rot, scale: base };
       // Nahbereich: Haus (auch in zweiter Reihe) und Einfahrt sichtbar halten, solange sie
       // voraus oder neben dem Fahrzeug liegen. Erst seitlich verschieben (Fahrzeug aus der
       // Mitte), dann begrenzt herauszoomen; sonst zeigt ein Pfeil am Rand die Richtung.
       const must = [T, J].filter((p): p is [number, number] => {
         if (!p || Math.hypot(p[0] - U[0], p[1] - U[1]) > 120) return false;
-        return toScreen(cam, p[0], p[1])[1] <= carY + 20;
+        return scr(cam, p[0], p[1])[1] <= carScreenY + 20;
       });
       if (must.length) {
         const left = lx0 + 40;
         const right = w - 95; // rechts liegen die Zoomknöpfe
         let shift = 0;
         for (const [x, y] of must) {
-          const sx = toScreen(cam, x, y)[0];
+          const sx = scr(cam, x, y)[0];
           if (sx > right) shift = Math.max(shift, sx - right);
           else if (sx < left) shift = Math.min(shift, sx - left);
         }
         shift = Math.max(-(w - lx0) * 0.3, Math.min((w - lx0) * 0.3, shift));
-        cam = { ...cam, sx: cx - shift };
+        // In der Navi-Ansicht wirkt eine flache Verschiebung an der Fahrzeugstelle verkleinert
+        cam = { ...cam, sx: cx - shift * (P ? 1 / factorScreen(P, carScreenY) : 1) };
         // Je näher, desto mehr darf herausgezoomt werden (stufenlos, kein Sprung): bei 120 m
         // gar nicht, ab 30 m bis auf die Hälfte.
         const dMin = Math.min(...must.map((p) => Math.hypot(p[0] - U[0], p[1] - U[1])));
@@ -543,7 +631,7 @@ export class MapView {
         for (let i = 0; i < 20 && cam.scale * 0.95 >= lowest; i++) {
           const c = cam;
           const out = must.some(([x, y]) => {
-            const [sx, sy] = toScreen(c, x, y);
+            const [sx, sy] = scr(c, x, y);
             return sx < left || sx > right || sy < top + m || sy > bottom - m;
           });
           if (!out) break;
@@ -553,9 +641,11 @@ export class MapView {
       this.cam = cam;
       return;
     }
-    const P = T ?? J ?? (focus?.bbox ? this.proj.toXY((focus.bbox[0] + focus.bbox[2]) / 2, (focus.bbox[1] + focus.bbox[3]) / 2) : null);
-    if (!P) return;
-    this.cam = { ax: P[0], ay: P[1], sx: cx, sy: top + vh / 2, rot, scale: Math.min(4, Math.min(w - lx0, vh) / 160) };
+    const Pt = T ?? J ?? (focus?.bbox ? this.proj.toXY((focus.bbox[0] + focus.bbox[2]) / 2, (focus.bbox[1] + focus.bbox[3]) / 2) : null);
+    if (!Pt) return;
+    const P2 = P;
+    const midY = P2 ? unproject(P2, cx, top + vh / 2)[1] : top + vh / 2;
+    this.cam = { ax: Pt[0], ay: Pt[1], sx: cx, sy: midY, rot, scale: Math.min(4, Math.min(w - lx0, vh) / 160) };
   }
 
   private zoom(f: number, sx?: number, sy?: number) {
@@ -563,8 +653,9 @@ export class MapView {
     const px = sx ?? w / 2;
     const py = sy ?? h / 2;
     this.settle();
-    const [wx, wy] = toWorld(this.cam, px, py);
-    this.cam = this.view = { ...this.cam, ax: wx, ay: wy, sx: px, sy: py, scale: Math.min(14, Math.max(0.02, this.cam.scale * f)) };
+    const [fx, fy] = this.flat(px, py);
+    const [wx, wy] = toWorld(this.cam, fx, fy);
+    this.cam = this.view = { ...this.cam, ax: wx, ay: wy, sx: fx, sy: fy, scale: Math.min(14, Math.max(0.02, this.cam.scale * f)) };
     this.setAuto(false);
     this.kick();
   }
@@ -612,8 +703,9 @@ export class MapView {
       if (this.press && Math.hypot(p.x - this.press.x, p.y - this.press.y) > 10) this.cancelPress();
       if (this.press?.moved) {
         this.settle();
-        const [wx, wy] = toWorld(this.cam, prev.x, prev.y);
-        this.cam = this.view = { ...this.cam, ax: wx, ay: wy, sx: p.x, sy: p.y };
+        const [wx, wy] = toWorld(this.cam, ...this.flat(prev.x, prev.y));
+        const [fx, fy] = this.flat(p.x, p.y);
+        this.cam = this.view = { ...this.cam, ax: wx, ay: wy, sx: fx, sy: fy };
         this.setAuto(false);
         this.kick();
       }
@@ -679,6 +771,24 @@ export class MapView {
       }
     }
     let moving = false;
+    // Neigung: ändert sich der freie Bereich (Kopf, Zielkarte), gleitet sie in 0,3 s hinüber
+    const Pt = this.persp(w);
+    if (!Pt) {
+      this.pv = null;
+      this.pvAnim = null;
+    } else if (!this.pv || !this.motion) this.pv = Pt;
+    else {
+      const ziel = this.pvAnim?.to ?? this.pv;
+      if (Math.abs(ziel.y0 - Pt.y0) > 0.5 || Math.abs(ziel.cx - Pt.cx) > 0.5 || Math.abs(1 / ziel.k - 1 / Pt.k) > 0.5) this.pvAnim = { from: this.pv, to: Pt, t0: now };
+      if (this.pvAnim) {
+        const { from, to, t0 } = this.pvAnim;
+        const t = Math.min(1, (now - t0) / 300);
+        const e = 1 - Math.pow(1 - t, 3);
+        this.pv = { y0: from.y0 + (to.y0 - from.y0) * e, cx: from.cx + (to.cx - from.cx) * e, k: 1 / (1 / from.k + (1 / to.k - 1 / from.k) * e) };
+        if (t >= 1) this.pvAnim = null;
+        else moving = true;
+      }
+    }
     if (this.anim) {
       const a = this.anim;
       const t = Math.min(1, Math.max(0, (now - a.t0) / a.dur));
@@ -709,21 +819,41 @@ export class MapView {
     const g = this.poseGoal;
     const key = `${this.dataKey};${w};${h};${this.insets.top};${this.insets.bottom};${this.auto || !g ? '' : `${g.x.toFixed(1)},${g.y.toFixed(1)}`}`;
     const d = this.drawn;
-    if (key !== this.drawnKey || !d || !covers(d, this.view, w, h, this.ov) || (!this.anim && !sameCam(d, this.cam, w, h))) {
-      const at = !this.anim || covers(this.cam, this.view, w, h, this.ov) ? this.cam : this.view;
+    const P = this.pv;
+    const ext = this.extent(w, h, P);
+    const bounds = { x0: -ext.ovX + 2, y0: -ext.ovTop + 2, x1: w + ext.ovX - 2, y1: h + this.ov - 2 };
+    const fits = (dr: Cam, v: Cam) => (P ? coversPoints(dr, v, ext.need, bounds) : covers(dr, v, w, h, this.ov));
+    // Navi: Beschriftungen sind für ihre Tiefe entzerrt; rücken sie merklich näher, neu zeichnen
+    const drift = (dr: Cam, v: Cam) => {
+      if (!P) return false;
+      const [x, y] = toScreen(dr, v.ax, v.ay);
+      return Math.hypot(x - v.sx, y - v.sy) > 14;
+    };
+    const fullKey = `${key};${P ? 'navi' : 'flach'}`;
+    // Neigung hat sich seit dem Zeichnen merklich geändert: Beschriftungen neu entzerren
+    const dp = this.drawnP;
+    const pAlt = !!P && !!dp && (Math.abs(P.y0 - dp.y0) > 6 || Math.abs(P.cx - dp.cx) > 6 || Math.abs(1 / P.k - 1 / dp.k) > 20);
+    const settled = !this.anim && !this.pvAnim;
+    if (fullKey !== this.drawnKey || !d || !fits(d, this.view) || drift(d, this.view) || pAlt || (settled && (!sameCam(d, this.cam, w, h) || (!!P && !!dp && (P.y0 !== dp.y0 || P.cx !== dp.cx || P.k !== dp.k))))) {
+      const at = !this.anim || (fits(this.cam, this.view) && !drift(this.cam, this.view)) ? this.cam : this.view;
       this.render(at, w, h);
+      this.drawnP = P;
       this.drawn = at;
-      this.drawnKey = key;
+      this.drawnKey = fullKey;
     }
-    this.applyTransform(w, h);
+    this.applyTransform(w, h, P);
     this.placeCar();
     if (moving) this.kick();
   }
 
   /** Fertiges Bild auf die angezeigte Ansicht schieben und drehen (nur eine CSS-Matrix) */
-  private applyTransform(w: number, h: number) {
+  private applyTransform(w: number, h: number, P: Persp | null) {
     const d = this.drawn;
     if (!d) return;
+    if (P) {
+      this.svg.style.transform = matrix3d(mul3(homography(P), affine(screenMatrix(d, this.view))));
+      return;
+    }
     if (sameCam(d, this.view, w, h)) {
       if (this.svg.style.transform) this.svg.style.transform = '';
       return;
@@ -745,13 +875,24 @@ export class MapView {
       this.accEl.hidden = true;
       return;
     }
-    const [x, y] = toScreen(this.view, p.x, p.y);
-    const ang = p.bearing === null ? 0 : angleDiff(this.view.rot, p.bearing);
+    const P = this.pv;
+    const scr = (wx: number, wy: number): [number, number] => {
+      const q = toScreen(this.view, wx, wy);
+      return P ? project(P, q[0], q[1]) : q;
+    };
+    const [x, y] = scr(p.x, p.y);
+    let ang = 0;
+    if (p.bearing !== null) {
+      // Richtung auf dem Bildschirm aus einem Punkt 3 m voraus (stimmt auch in der Navi-Ansicht)
+      const r = (p.bearing * Math.PI) / 180;
+      const [x2, y2] = scr(p.x + Math.sin(r) * 3, p.y + Math.cos(r) * 3);
+      ang = (Math.atan2(x2 - x, y - y2) * 180) / Math.PI;
+    }
     this.carEl.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${ang.toFixed(1)}deg)`;
     this.carEl.classList.toggle('no-heading', p.bearing === null);
     // Ungenauigkeit nur zeigen, wenn sie deutlich größer als das Fahrzeug ist
-    const r = acc * this.view.scale;
-    this.accEl.hidden = !(r > 30);
+    const r = acc * this.view.scale * (P ? 1 / factorScreen(P, y) : 1);
+    this.accEl.hidden = !(r > 30) || !!P;
     if (r > 30) {
       this.accEl.style.width = this.accEl.style.height = `${(2 * r).toFixed(0)}px`;
       this.accEl.style.transform = `translate(${(x - r).toFixed(1)}px,${(y - r).toFixed(1)}px)`;
@@ -769,7 +910,7 @@ export class MapView {
     area: { x0: number; y0: number; x1: number; y1: number; top: number; bottom: number; left: number; w: number },
     free: (x0: number, y0: number, x1: number, y1: number) => boolean,
     reserve: (x0: number, y0: number, x1: number, y1: number) => void,
-    parent: Element,
+    draw: (cx: number, cy: number, ang: number, size: number, cls: string, text: string) => void,
     size = 16,
   ): boolean {
     const tw = st.name.length * size * 0.58 + 6;
@@ -851,52 +992,63 @@ export class MapView {
       const half = size * 0.55;
       if (!c.samples.every(([x, y]) => free(x - 5, y - half, x + 5, y + half))) continue;
       for (const [x, y] of c.samples) reserve(x - 5, y - half, x + 5, y + half);
-      const t = el(
-        'text',
-        {
-          x: c.cx,
-          y: c.cy + size * 0.35,
-          transform: `rotate(${c.ang.toFixed(1)} ${c.cx.toFixed(1)} ${c.cy.toFixed(1)})`,
-          class: isFocus ? 'st-label st-label-focus' : 'st-label',
-          style: `font-size:${size}px`,
-        },
-        parent,
-      );
-      t.textContent = st.name;
+      draw(c.cx, c.cy, c.ang, size, isFocus ? 'st-label st-label-focus' : 'st-label', st.name);
       return true;
     }
     return false;
   }
 
-  /** Zeichnet alles (außer dem Fahrzeug) für die Ansicht `cam`, mit Rand ringsum zum Gleiten */
+  /**
+   * Zeichnet alles (außer dem Fahrzeug) für die Ansicht `cam`, mit Rand ringsum zum Gleiten.
+   * Straßen, Gebäude und Hauspunkte liegen flach auf der Karte; Beschriftungen werden auf dem
+   * Bildschirm verteilt und – in der Navi-Ansicht – an ihrer Stelle entzerrt gezeichnet.
+   */
   private render(cam: Cam, w: number, h: number) {
     const svg = this.svg;
-    const ov = this.ov;
-    if (this.svgSize !== `${w}x${h}`) {
-      this.svgSize = `${w}x${h}`;
-      svg.setAttribute('viewBox', `${-ov} ${-ov} ${w + 2 * ov} ${h + 2 * ov}`);
-      if (ov) {
-        svg.style.left = svg.style.top = `${-ov}px`;
-        svg.style.width = `${w + 2 * ov}px`;
-        svg.style.height = `${h + 2 * ov}px`;
-        svg.style.transformOrigin = `${ov}px ${ov}px`;
+    const P = this.pv;
+    const { ovX, ovTop } = this.extent(w, h, P);
+    const ovB = this.ov;
+    const geo = `${w}x${h}:${ovX},${ovTop}`;
+    if (this.svgSize !== geo) {
+      this.svgSize = geo;
+      svg.setAttribute('viewBox', `${-ovX} ${-ovTop} ${w + 2 * ovX} ${h + ovTop + ovB}`);
+      if (this.ov) {
+        svg.style.left = `${-ovX}px`;
+        svg.style.top = `${-ovTop}px`;
+        svg.style.width = `${w + 2 * ovX}px`;
+        svg.style.height = `${h + ovTop + ovB}px`;
+        svg.style.transformOrigin = `${ovX}px ${ovTop}px`;
       }
     }
     svg.replaceChildren();
+    this.scaleEl.parentElement?.classList.toggle('navi', !!P);
     const S = cam.scale;
     const top = this.insets.top;
     const bottom = Math.max(top + 80, h - this.insets.bottom);
     const left = Math.min(this.insets.left, w - 120);
     const midX = left + (w - left) / 2;
-    const X0 = -ov;
-    const Y0 = -ov;
-    const X1 = w + ov;
-    const Y1 = h + ov;
-    const toS = (lat: number, lon: number): [number, number] => {
+    // Flach: Zeichenfläche mit Rand. Bildschirm: Bereich, in dem Beschriftungen stehen dürfen.
+    const FX0 = -ovX;
+    const FY0 = -ovTop;
+    const FX1 = w + ovX;
+    const FY1 = h + ovB;
+    const X0 = P ? left - 40 : -this.ov;
+    const Y0 = P ? top - 30 : -this.ov;
+    const X1 = P ? w + 40 : w + this.ov;
+    const Y1 = h + this.ov;
+    const toF = (lat: number, lon: number): [number, number] => {
       const [x, y] = this.proj.toXY(lat, lon);
       return toScreen(cam, x, y);
     };
+    const proj2 = (q: [number, number]): [number, number] => {
+      if (!P) return q;
+      // weit hinter dem Fahrzeug liegt nichts mehr im Bild
+      if (1 + P.k * (P.y0 - q[1]) < 0.2) return [-1e6, -1e6];
+      return project(P, q[0], q[1]);
+    };
+    const toS = (lat: number, lon: number): [number, number] => proj2(toF(lat, lon));
     const visible = (x: number, y: number, pad = 20) => x > X0 - pad && x < X1 + pad && y > Y0 - pad && y < Y1 + pad;
+    const visibleF = (x: number, y: number, pad = 20) => x > FX0 - pad && x < FX1 + pad && y > FY0 - pad && y < FY1 + pad;
     const inBounds = (b: number[]) => b[0] > X0 && b[2] < X1 && b[1] > Y0 && b[3] < Y1;
     // Beschriftungen ohne Überlappung: belegte Rechtecke merken, Überlappendes weglassen
     const placed: number[][] = [];
@@ -905,10 +1057,10 @@ export class MapView {
       !placed.some((b) => x0 < b[2] && x1 > b[0] && y0 < b[3] && y1 > b[1]);
     // Gezeichneter Bereich in Grad (für Straßen-Auswahl)
     const corners = [
-      [X0, Y0],
-      [X1, Y0],
-      [X0, Y1],
-      [X1, Y1],
+      [FX0, FY0],
+      [FX1, FY0],
+      [FX0, FY1],
+      [FX1, FY1],
     ].map(([sx, sy]) => this.proj.toLatLon(...toWorld(cam, sx, sy)) as [number, number]);
     const south = Math.min(...corners.map((c) => c[0])) - 0.0008;
     const north = Math.max(...corners.map((c) => c[0])) + 0.0008;
@@ -917,7 +1069,20 @@ export class MapView {
     const { index, focus, emphasis, target, neighbors, draft, driveway, houses } = this.data;
     const carLL = this.carPos();
     const g0 = this.goal();
-    const carS = g0 ? toScreen(cam, g0.x, g0.y) : null;
+    const carS = g0 ? proj2(toScreen(cam, g0.x, g0.y)) : null;
+    // Navi: Schrift weiter voraus etwas kleiner (wie Schilder in der Ferne), am Fahrzeug normal
+    const fCar = P && carS ? factorScreen(P, carS[1]) : 1;
+    const sig = (y: number) => (P ? Math.min(1.08, Math.max(0.62, Math.sqrt(fCar / factorScreen(P, y)))) : 1);
+    /** Gruppe an einer Bildschirmstelle: innen gilt Bildschirmmaß, in der Navi-Ansicht entzerrt */
+    const bb = (parent: Element, x: number, y: number, attrs: Record<string, string | number> = {}) => {
+      let transform: string;
+      if (P) {
+        const [fx, fy] = unproject(P, x, y);
+        const [a, b, c, d] = unskew(P, fx, fy);
+        transform = `matrix(${a.toFixed(4)} ${b} ${c.toFixed(4)} ${d.toFixed(4)} ${fx.toFixed(1)} ${fy.toFixed(1)})`;
+      } else transform = `translate(${x.toFixed(1)} ${y.toFixed(1)})`;
+      return el('g', { ...attrs, transform }, parent);
+    };
 
     // Vorrang: Ziel, Einfahrt, Nachbarn, Fahrzeug – Beschriftungen weichen ihnen aus
     if (target) {
@@ -932,7 +1097,7 @@ export class MapView {
       const [x, y] = toS(n.lat, n.lon);
       reserve(x - 13, y - 34, x + 13, y + 13);
     }
-    if (carS) reserve(carS[0] - 24, carS[1] - 26, carS[0] + 24, carS[1] + 24);
+    if (carS) reserve(carS[0] - 21, carS[1] - 22, carS[0] + 21, carS[1] + 21);
     // Knöpfe und Maßstab auf der Karte freihalten
     const cr = this.canvas.getBoundingClientRect();
     for (const box of [this.controls, this.corner]) {
@@ -956,7 +1121,7 @@ export class MapView {
     let arrowDraw: (() => void) | null = null;
     if (arrow) {
       const from = carS ?? ([midX, (top + bottom) / 2] as [number, number]);
-      const ref = g0 ? [g0.x, g0.y] : toWorld(cam, midX, (top + bottom) / 2);
+      const ref = g0 ? [g0.x, g0.y] : toWorld(cam, ...(P ? unproject(P, midX, (top + bottom) / 2) : ([midX, (top + bottom) / 2] as [number, number])));
       const [ax0, ay0] = this.proj.toXY(arrow.lat, arrow.lon);
       const r = (cam.rot * Math.PI) / 180;
       const dx = ax0 - ref[0];
@@ -996,7 +1161,7 @@ export class MapView {
       reserve(px - 26, py - 26, px + 26, py + 26);
       if (lage) reserve(lage[0] - tw / 2, lage[1] - 22, lage[0] + tw / 2, lage[1] + 12);
       arrowDraw = () => {
-        const g = el('g', { class: 'edge-arrow', transform: `translate(${px.toFixed(1)} ${py.toFixed(1)})` }, svg);
+        const g = bb(svg, px, py, { class: 'edge-arrow' });
         el('path', { d: 'M0 -22 L16 8 L0 0 L-16 8 Z', transform: `rotate(${angle.toFixed(1)})`, class: 'edge-arrow-head' }, g);
         if (!lage) return;
         const [lx, ly] = lage;
@@ -1011,7 +1176,7 @@ export class MapView {
     const pathOf = (line: [number, number][]) =>
       line
         .map(([la, lo], i) => {
-          const [x, y] = toS(la, lo);
+          const [x, y] = toF(la, lo);
           return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
         })
         .join('');
@@ -1035,13 +1200,13 @@ export class MapView {
         let d = '';
         for (const o of s.outlines) {
           if (verts > 25000) break;
-          const [fx, fy] = toS(o[0][0], o[0][1]);
-          if (!visible(fx, fy, 80)) continue;
+          const [fx, fy] = toF(o[0][0], o[0][1]);
+          if (!visibleF(fx, fy, 80)) continue;
           verts += o.length;
           d +=
             o
               .map(([la, lo], i) => {
-                const [x, y] = toS(la, lo);
+                const [x, y] = toF(la, lo);
                 return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
               })
               .join('') + 'Z';
@@ -1061,7 +1226,7 @@ export class MapView {
       if (r === 2) for (const line of s.lines) el('path', { d: pathOf(line), class: 'st st-focus-case', 'stroke-width': sw + 4 }, gStreets);
       for (const line of s.lines) el('path', { d: pathOf(line), class: cls, 'stroke-width': sw }, gStreets);
       if (!s.lines.length && s.start && s === focus) {
-        const [x, y] = toS(s.start[0], s.start[1]);
+        const [x, y] = toF(s.start[0], s.start[1]);
         el('circle', { cx: x, cy: y, r: 8, class: 'st-start' }, gStreets);
       }
     }
@@ -1078,13 +1243,14 @@ export class MapView {
     const gDots = el('g', {}, svg);
     const gNum = el('g', { class: 'numbers' }, svg);
     const targetNorm = target ? normHouseNumber(target.label) : '';
-    type Haus = { n: HouseNumber; x: number; y: number; isFocus: boolean; label: boolean; street: string; mark: HouseMark | undefined };
+    type Haus = { n: HouseNumber; x: number; y: number; fx: number; fy: number; isFocus: boolean; label: boolean; street: string; mark: HouseMark | undefined };
     const haeuser: { item: Haus; street: string; x: number; y: number }[] = [];
     let dots = 0;
     for (const s of shown) {
       for (const n of s.numbers) {
         if (dots > 1800) break;
-        const [x, y] = toS(n.lat, n.lon);
+        const [fx, fy] = toF(n.lat, n.lon);
+        const [x, y] = proj2([fx, fy]);
         if (!visible(x, y)) continue;
         dots++;
         // Zielnummer steht schon in der Zielmarkierung
@@ -1092,14 +1258,19 @@ export class MapView {
         const [wx, wy] = this.proj.toXY(n.lat, n.lon);
         // Seite und Abstand gelten für die Straße, auf der man fährt (auch wenn das Ziel woanders liegt)
         const mark = houses?.get(n);
-        haeuser.push({ item: { n, x, y, isFocus: s === focus, label, street: s.id, mark }, street: s.id, x: wx, y: wy });
+        haeuser.push({ item: { n, x, y, fx, fy, isFocus: s === focus, label, street: s.id, mark }, street: s.id, x: wx, y: wy });
       }
     }
     // Mehrere Nummern an einem Haus (5, 5a, 5b …): eine gemeinsame Beschriftung
     const gruppen = groupSameHouse(haeuser);
     // Hauspunkte mit Gruppe: eine Beschriftung darf nur die Punkte ihres eigenen Hauses verdecken
     const dotBoxes: { g: number; b: number[] }[] = [];
-    gruppen.forEach((g, i) => g.forEach((hs) => dotBoxes.push({ g: i, b: [hs.x - 5, hs.y - 5, hs.x + 5, hs.y + 5] })));
+    gruppen.forEach((g, i) =>
+      g.forEach((hs) => {
+        const r = 5 * sig(hs.y);
+        dotBoxes.push({ g: i, b: [hs.x - r, hs.y - r, hs.x + r, hs.y + r] });
+      }),
+    );
     const freeDots = (x0: number, y0: number, x1: number, y1: number, eigene = -1) =>
       !dotBoxes.some(({ g, b: d }) => g !== eigene && x0 < d[2] && x1 > d[0] && y0 < d[3] && y1 > d[1]);
     type Item = {
@@ -1140,28 +1311,42 @@ export class MapView {
     const ordered = labelOrder(cands, carS, [midX, (top + bottom) / 2]);
 
     // Zuerst die beiden „nächsten“ Häuser: farbig hinterlegt, direkt auf dem Haus oder daneben
-    type Pill = { it: Item; box: number[]; cx: number; cy: number; pw: number; ph: number; auf: boolean };
+    type Pill = { it: Item; box: number[]; cx: number; cy: number; pw: number; ph: number; auf: boolean; fs: number };
     const pills: Pill[] = [];
     for (const it of ordered) {
       if (!it.next || !it.side) continue;
-      const tw = it.text.length * PILL_FONT * 0.6 + 2;
-      const pw = Math.max(tw + 16, PILL_FONT + 14);
-      const ph = PILL_FONT + 12;
-      const orte: [number, number, boolean][] = [
-        [it.x, it.y, true],
-        [it.x + 8 + pw / 2, it.y, false],
-        [it.x - 8 - pw / 2, it.y, false],
-        [it.x, it.y - 9 - ph / 2, false],
-        [it.x, it.y + 9 + ph / 2, false],
+      const k = sig(it.y);
+      // vom Fahrzeug weg ausweichen, falls es direkt daneben steht
+      const weg = it.x < (carS?.[0] ?? midX) ? -1 : 1;
+      // erst groß, bei dichter Bebauung kompakt (passt zwischen zwei Nachbarhäuser)
+      const formen = [
+        { fs: PILL_FONT * k, pad: 8 * k, padY: 6 * k },
+        { fs: (PILL_FONT - 3) * k, pad: 5 * k, padY: 2 * k },
       ];
-      for (const [cx, cy, auf] of orte) {
-        // selbst gesetzte Punkte behalten ihr eigenes Zeichen (Quadrat)
-        if (auf && it.user) continue;
-        const box = [cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2];
-        if (!inBounds(box) || !free(box[0], box[1], box[2], box[3]) || !freeDots(box[0], box[1], box[2], box[3], it.gruppe)) continue;
-        reserve(box[0], box[1], box[2], box[3]);
-        pills.push({ it, box, cx, cy, pw, ph, auf });
-        break;
+      let done = false;
+      for (const { fs, pad, padY } of formen) {
+        const tw = it.text.length * fs * 0.6 + 2;
+        const pw = Math.max(tw + 2 * pad, fs + 2 * pad);
+        const ph = fs + 2 * padY;
+        const orte: [number, number, boolean][] = [
+          [it.x, it.y, true],
+          [it.x + weg * 12, it.y, true],
+          [it.x + 8 + pw / 2, it.y, false],
+          [it.x - 8 - pw / 2, it.y, false],
+          [it.x, it.y - 9 - ph / 2, false],
+          [it.x, it.y + 9 + ph / 2, false],
+        ];
+        for (const [cx, cy, auf] of orte) {
+          // selbst gesetzte Punkte behalten ihr eigenes Zeichen (Quadrat)
+          if (auf && it.user) continue;
+          const box = [cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2];
+          if (!inBounds(box) || !free(box[0], box[1], box[2], box[3]) || !freeDots(box[0], box[1], box[2], box[3], it.gruppe)) continue;
+          reserve(box[0], box[1], box[2], box[3]);
+          pills.push({ it, box, cx, cy, pw, ph, auf, fs });
+          done = true;
+          break;
+        }
+        if (done) break;
       }
     }
     const pillItems = new Set(pills.map((p) => p.it));
@@ -1169,7 +1354,8 @@ export class MapView {
 
     /** Plätze: direkt auf dem Haus, sonst daneben (rechts, links, oben, unten, schräg oben) */
     const spots = (x: number, y: number, tw: number, size: number) => [
-      { tx: x, ty: y + size * 0.36, anchor: 'middle', box: [x - tw / 2, y - size * 0.5, x + tw / 2, y + size * 0.5], auf: true },
+      // direkt aufs Haus: Ziffern sind etwa 0,72 Schriftgrößen hoch, dazu ein schmaler Rand
+      { tx: x, ty: y + size * 0.36, anchor: 'middle', box: [x - tw / 2, y - size * 0.42, x + tw / 2, y + size * 0.42], auf: true },
       { tx: x + 7, ty: y + 7, anchor: 'start', box: [x + 5, y + 7 - size, x + 9 + tw, y + 10], auf: false },
       { tx: x - 7, ty: y + 7, anchor: 'end', box: [x - 9 - tw, y + 7 - size, x - 5, y + 10], auf: false },
       { tx: x, ty: y - 8, anchor: 'middle', box: [x - tw / 2 - 1, y - 8 - size, x + tw / 2 + 1, y - 5], auf: false },
@@ -1191,14 +1377,14 @@ export class MapView {
      * zwei Anordnungen vergleichen lassen. Zuerst bekommt jede Nummer ihren Platz aus dem
      * letzten Bild, wenn er frei ist: Beim Fahren springen die Nummern dann nicht hin und her.
      */
-    const platziere = (versuche: Array<{ auf: boolean | null; sz: number }>, jeHaus: boolean): Platz[] => {
+    const platziere = (versuche: Array<{ auf: boolean | null; sz: number }>, jeHaus: boolean, nurSz = -1): Platz[] => {
       const belegt = placed.slice();
       const frei = (b: number[]) => !belegt.some((q) => b[0] < q[2] && b[2] > q[0] && b[1] < q[3] && b[3] > q[1]);
       const erg: Platz[] = [];
       const fertig = new Set<Item>();
       const passt = (it: Item, k: number, sz: number, auf: boolean | null): Platz | null => {
         const g = groessen[sz];
-        const size = it.isFocus ? g.eigen : g.fremd;
+        const size = (it.isFocus ? g.eigen : g.fremd) * sig(it.y);
         // Ziffern sind schmaler als ein Geviert; der Rand (Halo) gehört zum Kasten
         const tw = it.text.length * size * 0.58 + 3;
         const all = spots(it.x, it.y, tw, size);
@@ -1221,7 +1407,7 @@ export class MapView {
       for (const it of rest) {
         if (grenze()) break;
         const m = memo.get(it.key);
-        const pl = m ? passt(it, m.k, m.sz, null) : null;
+        const pl = m && (nurSz < 0 || m.sz === nurSz) ? passt(it, m.k, m.sz, null) : null;
         if (pl) nimm(pl);
       }
       if (jeHaus) {
@@ -1251,7 +1437,7 @@ export class MapView {
     };
     // Zwei Anordnungen: (A) alle Nummern direkt aufs Haus, wo es geht – klar und ruhig;
     // (B) Haus für Haus der erste freie Platz – bringt bei sehr dichter Bebauung mehr unter.
-    // Es gewinnt, was mehr Nummern zeigt (eigene Straße zählt doppelt); bei Gleichstand A.
+    // Es gewinnt, was mehr Nummern zeigt (eigene Straße zählt doppelt).
     const A = platziere(
       [
         { auf: true, sz: 0 },
@@ -1268,8 +1454,27 @@ export class MapView {
       ],
       true,
     );
+    // (C) alles in der kleineren Schrift: bei dichter Bebauung ruhiger als abwechselnd groß und klein
+    const C = platziere(
+      [
+        { auf: true, sz: 1 },
+        { auf: false, sz: 1 },
+      ],
+      false,
+      1,
+    );
     const wert = (l: Platz[]) => l.reduce((a, p) => a + (p.it.isFocus ? 2 : 1) * (p.it.text.includes('–') ? 3 : p.it.text.split(',').length), 0);
-    const gewaehlt = wert(B) > wert(A) ? B : A;
+    // Mehr Nummern gewinnen; bei Gleichstand eine einheitliche Schrift auf der eigenen Straße, dann A
+    const einheitlich = (l: Platz[]) => new Set(l.filter((p) => p.it.isFocus).map((p) => p.sz)).size <= 1;
+    // Die zuletzt gewählte Anordnung behält den Vorzug, solange keine klar besser ist (ruhiges Bild)
+    const namen = new Map<Platz[], string>([
+      [A, 'A'],
+      [B, 'B'],
+      [C, 'C'],
+    ]);
+    const note = (l: Platz[]) => wert(l) * 10 + (einheitlich(l) ? 5 : 0) + (l === A ? 1 : 0) + (namen.get(l) === this.layout ? 25 : 0);
+    const gewaehlt = [A, B, C].reduce((best, l) => (note(l) > note(best) ? l : best));
+    this.layout = namen.get(gewaehlt) ?? 'A';
     this.memo = new Map(gewaehlt.map((p) => [p.it.key, { k: p.k, sz: p.sz }]));
     const aufHaus = new Set<number>();
     const sideCls = (it: Item) => (it.isFocus && it.side ? ` hn-${it.side === 'left' ? 'l' : 'r'}` : '');
@@ -1278,16 +1483,16 @@ export class MapView {
       if (spot.auf) aufHaus.add(it.gruppe);
       // Selbst gesetzt: mit Punkt davor; geschätzt: kursiv (nicht nur Farbe); vorbei: blasser
       const cls = `hn-label${it.isFocus ? '' : ' hn-label-other'}${it.est ? ' hn-est-label' : ''}${it.user ? ' hn-user-label' : ''}${it.passed ? ' hn-passed' : ''}${sideCls(it)}`;
-      const attrs: Record<string, string | number> = { x: spot.tx, y: spot.ty, 'text-anchor': spot.anchor, class: cls };
-      if (size !== NUMBER_FONT) attrs.style = `font-size:${size}px`;
-      const t = el('text', attrs, gNum);
+      const attrs: Record<string, string | number> = { 'text-anchor': spot.anchor, class: cls };
+      if (size !== NUMBER_FONT) attrs.style = `font-size:${size.toFixed(1)}px`;
+      const t = el('text', attrs, bb(gNum, spot.tx, spot.ty));
       t.textContent = it.text;
     }
     for (const p of pills) {
       if (p.auf) aufHaus.add(p.it.gruppe);
-      const g = el('g', { class: `hn-pill hn-pill-${p.it.side === 'left' ? 'l' : 'r'}${p.it.est ? ' hn-est-label' : ''}` }, gNum);
-      el('rect', { x: p.box[0], y: p.box[1], width: p.pw, height: p.ph, rx: p.ph / 2 }, g);
-      const t = el('text', { x: p.cx, y: p.cy + PILL_FONT * 0.36, 'text-anchor': 'middle' }, g);
+      const g = bb(gNum, p.cx, p.cy, { class: `hn-pill hn-pill-${p.it.side === 'left' ? 'l' : 'r'}${p.it.est ? ' hn-est-label' : ''}` });
+      el('rect', { x: -p.pw / 2, y: -p.ph / 2, width: p.pw, height: p.ph, rx: p.ph / 2 }, g);
+      const t = el('text', { y: p.fs * 0.36, 'text-anchor': 'middle', style: `font-size:${p.fs.toFixed(1)}px` }, g);
       t.textContent = p.it.text;
     }
     // Punkte nur für Häuser, deren Nummer nicht direkt auf dem Haus steht
@@ -1296,8 +1501,8 @@ export class MapView {
       for (const hs of g) {
         const est = hs.n.source === 'osm-interp';
         const dim = hs.mark && hs.mark.ahead < -PASSED_DIM_M ? ' hn-passed' : '';
-        if (hs.n.user) el('rect', { x: hs.x - 4.5, y: hs.y - 4.5, width: 9, height: 9, class: 'hn hn-user' + dim }, gDots);
-        else el('circle', { cx: hs.x, cy: hs.y, r: 4, class: (est ? 'hn hn-est' : 'hn') + dim }, gDots);
+        if (hs.n.user) el('rect', { x: hs.fx - 4.5, y: hs.fy - 4.5, width: 9, height: 9, class: 'hn hn-user' + dim }, gDots);
+        else el('circle', { cx: hs.fx, cy: hs.fy, r: 4, class: (est ? 'hn hn-est' : 'hn') + dim }, gDots);
       }
     });
     // Straßennamen meiden auch die Hauspunkte
@@ -1308,35 +1513,40 @@ export class MapView {
     const maxStreetLabels = this.live ? 5 : 40;
     const named = shown.filter((s) => s.lines.length).sort((a, b) => rank(b) - rank(a));
     const area = { x0: X0, y0: Y0, x1: X1, y1: Y1, top, bottom, left, w };
+    const drawLabel = (cx: number, cy: number, ang: number, size: number, cls: string, text: string) => {
+      const t = el('text', { y: size * 0.35, transform: `rotate(${ang.toFixed(1)})`, class: cls, style: `font-size:${size}px` }, bb(gLabels, cx, cy));
+      t.textContent = text;
+    };
     let labelCount = 0;
     for (const st of named) {
       if (labelCount >= maxStreetLabels) break;
-      if (this.placeStreetLabel(st, st === focus, toS, area, freeAll, reserve, gLabels, 15) || this.placeStreetLabel(st, st === focus, toS, area, freeAll, reserve, gLabels, 13))
+      if (this.placeStreetLabel(st, st === focus, toS, area, freeAll, reserve, drawLabel, 15) || this.placeStreetLabel(st, st === focus, toS, area, freeAll, reserve, drawLabel, 13))
         labelCount++;
     }
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);
-      el('circle', { cx: x, cy: y, r: 11, class: 'nb' }, svg);
+      el('circle', { r: 11, class: 'nb' }, bb(svg, x, y));
     }
     if (draft && draft.length) {
       el('path', { d: pathOf(draft), class: 'draft' }, svg);
       for (const [la, lo] of draft) {
-        const [x, y] = toS(la, lo);
+        const [x, y] = toF(la, lo);
         el('circle', { cx: x, cy: y, r: 7, class: 'draft-pt' }, svg);
       }
     }
     if (driveway && driveway.line.length) {
       const [x, y] = toS(driveway.line[0][0], driveway.line[0][1]);
-      const g = el('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)})` }, svg);
+      const g = bb(svg, x, y);
       el('circle', { r: 15, class: 'junction' }, g);
       const t = el('text', { y: 6, class: 'junction-label' }, g);
       t.textContent = 'E';
     }
     if (target) {
       const [x, y] = toS(target.lat, target.lon);
-      if (target.estimated) el('circle', { cx: x, cy: y, r: 31, class: 'target-est' }, svg);
-      el('circle', { cx: x, cy: y, r: 22, class: 'target' }, svg);
-      const t = el('text', { x, y: y + 7, class: 'target-label' + (target.estimated ? ' target-label-est' : '') }, svg);
+      const g = bb(svg, x, y);
+      if (target.estimated) el('circle', { r: 31, class: 'target-est' }, g);
+      el('circle', { r: 22, class: 'target' }, g);
+      const t = el('text', { y: 7, class: 'target-label' + (target.estimated ? ' target-label-est' : '') }, g);
       t.textContent = target.label.length > 4 ? target.label.slice(0, 4) : target.label;
     }
     if (arrowDraw) arrowDraw();

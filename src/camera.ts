@@ -114,3 +114,25 @@ export function covers(drawn: Cam, view: Cam, w: number, h: number, ov: number):
   }
   return true;
 }
+
+/**
+ * Wie covers, aber für beliebige Punkte (in flachen Koordinaten der angezeigten Ansicht) und
+ * einen beliebigen gezeichneten Bereich – für die Navi-Ansicht, deren sichtbarer Ausschnitt
+ * flach ein Trapez ist (oben breiter).
+ */
+export function coversPoints(
+  drawn: Cam,
+  view: Cam,
+  pts: Array<[number, number]>,
+  bounds: { x0: number; y0: number; x1: number; y1: number },
+): boolean {
+  if (Math.abs(angleDiff(drawn.rot, view.rot)) > MAX_TILT) return false;
+  const k = view.scale / drawn.scale;
+  if (k < 0.8 || k > 1.25) return false;
+  for (const [x, y] of pts) {
+    const [wx, wy] = toWorld(view, x, y);
+    const [px, py] = toScreen(drawn, wx, wy);
+    if (px < bounds.x0 || px > bounds.x1 || py < bounds.y0 || py > bounds.y1) return false;
+  }
+  return true;
+}

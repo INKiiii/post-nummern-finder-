@@ -77,6 +77,14 @@ export function liveScreen(root: HTMLElement) {
   const zoomOut = h('button', { class: 'sq-btn', 'aria-label': 'Weiter weg' }, icon('minus', 26));
   const zoomIn = h('button', { class: 'sq-btn', 'aria-label': 'Näher heran' }, icon('plus', 26));
   const recenterBtn = h('button', { class: 'sq-btn accent', 'aria-label': 'Zurück zur Position' }, icon('locate', 26));
+  // Ansicht: Navi (geneigt, Blick in Fahrtrichtung) oder flach – gemerkt
+  const viewBtn = h('button', { class: 'sq-btn view-btn' });
+  const renderViewBtn = () => {
+    const navi = map.getMode() === 'navi';
+    viewBtn.textContent = navi ? '2D' : '3D';
+    viewBtn.setAttribute('aria-label', navi ? 'Flache Karte' : 'Navi-Ansicht (Blick in Fahrtrichtung)');
+  };
+  renderViewBtn();
   const menuBadge = h('span', { class: 'badge-attn', 'aria-hidden': 'true' }, '!');
   const menuBtn = h('button', { class: 'sq-btn menu-btn', 'aria-label': 'Menü' }, icon('menu', 26), menuBadge);
   menuBadge.hidden = true;
@@ -87,7 +95,7 @@ export function liveScreen(root: HTMLElement) {
   };
   const bar = h('footer', { class: 'live-bar' }, searchBtn, hereBtn, menuBtn);
   const bottom = h('div', { class: 'live-bottom' }, targetCard, bar);
-  map.controls.append(zoomIn, zoomOut, recenterBtn);
+  map.controls.append(zoomIn, zoomOut, viewBtn, recenterBtn);
   recenterBtn.hidden = true;
 
   root.append(map.root, head, bottom);
@@ -140,11 +148,16 @@ export function liveScreen(root: HTMLElement) {
   const numCls = (u: Upcoming) => (u.n.source === 'osm-interp' ? ' est' : '') + (u.n.user ? ' user' : '');
   /** Entfernung zum nächsten Haus: „jetzt“, wenn man daneben ist, sonst in 5-m-Schritten */
   const distText = (ahead: number) => (ahead <= 6 ? 'jetzt' : `${Math.max(10, Math.round(ahead / 5) * 5)} m`);
-  const sideCard = (el: HTMLElement, side: 'left' | 'right', list: Upcoming[]) => {
+  const sideCard = (el: HTMLElement, side: 'left' | 'right', list: Upcoming[], wait = false) => {
     const [first, ...rest] = list;
     const cap = h('div', { class: 'lt-cap' }, side === 'left' ? '◀ LINKS' : 'RECHTS ▶');
     if (!first) {
-      el.replaceChildren(cap, h('div', { class: 'lt-main' }, h('span', { class: 'lt-none' }, 'keine')));
+      // gleiche Höhe wie mit Nummern: der Kopf springt nicht (und die Karte darunter auch nicht)
+      el.replaceChildren(
+        cap,
+        h('div', { class: 'lt-main' }, h('span', { class: 'lt-none' }, wait ? '…' : 'keine')),
+        h('div', { class: 'lt-rest lt-then' }, wait ? 'nach ein paar Metern' : ''),
+      );
       return;
     }
     const now = first.ahead <= 6;
@@ -210,9 +223,17 @@ export function liveScreen(root: HTMLElement) {
     placeEl.textContent = [st.place, t ? `Tour ${t.part}` : '', next ? `danach ${next.street.name}` : ''].filter(Boolean).join(' · ');
     const p = upcomingNumbers(matcher, m);
     if (!p) {
-      previewEl.hidden = true;
-      msgEl.hidden = false;
-      msgEl.textContent = st.numbers.length ? 'Seiten erscheinen nach ein paar Metern Fahrt.' : 'Keine Hausnummern bekannt.';
+      if (st.numbers.length) {
+        // Richtung noch unklar (z. B. gleich nach dem Abbiegen): Platzhalter statt Kopf umbauen
+        previewEl.hidden = false;
+        msgEl.hidden = true;
+        sideCard(leftEl, 'left', [], true);
+        sideCard(rightEl, 'right', [], true);
+      } else {
+        previewEl.hidden = true;
+        msgEl.hidden = false;
+        msgEl.textContent = 'Keine Hausnummern bekannt.';
+      }
       return null;
     }
     msgEl.hidden = true;
@@ -346,6 +367,10 @@ export function liveScreen(root: HTMLElement) {
     openEditor(s, t.number, getHouseInfo(houseKey(s, t.number)) ?? emptyHouseInfo(s, t.number), refresh);
   });
   zoomIn.addEventListener('click', () => map.zoomStep(1));
+  viewBtn.addEventListener('click', () => {
+    map.setMode(map.getMode() === 'navi' ? 'heading' : 'navi');
+    renderViewBtn();
+  });
   zoomOut.addEventListener('click', () => map.zoomStep(-1));
   recenterBtn.addEventListener('click', () => map.recenter());
   map.onFollowChange = (f) => {
