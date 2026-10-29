@@ -4,7 +4,7 @@
 // (das nächste Haus je Seite ist dort genauso farbig hinterlegt). Während der Fahrt rein
 // anzeigend: keine Pop-ups; Eingaben nur im Stand.
 
-import { h, overlay } from './dom';
+import { h, overlay, toast } from './dom';
 import { show } from './app';
 import { icon, type IconName } from './icons';
 import { state } from '../data';
@@ -13,7 +13,7 @@ import { gps, type Fix } from '../gps';
 import { formatDistance } from '../guidance';
 import { MapView } from '../mapview';
 import { currentMatch, forceStreet, getTarget, matcher, onMatch, setTarget } from '../session';
-import { houseMarks, upcomingNumbers, targetInfo, type Preview, type TargetInfo, type Upcoming } from '../preview';
+import { accessHint, houseMarks, upcomingNumbers, targetInfo, type AccessHint, type Preview, type TargetInfo, type Upcoming } from '../preview';
 import { ApproachAlert, beep, soundEnabled, unlockAudio } from '../approach';
 import { passBeepEnabled } from '../settings';
 import { keepAwake } from '../wakelock';
@@ -21,7 +21,7 @@ import { locationDeniedBox } from './location';
 import { emptyHouseInfo, getHouseInfo, houseKey, isEmpty, summarize } from '../houseinfo';
 import { openEditor } from './editor';
 import { hereMenu, longPressMenu } from './points';
-import { inTour, nextTourStreet, tourSuggestions } from '../tour';
+import { firstChoiceDue, getTour, hasBothParts, inTour, nextTourStreet, onTourChange, setFirst, tourSuggestions, type Part } from '../tour';
 import { onStatusChange, statusSummary, type StatusSummary } from '../status';
 import type { Match } from '../matcher';
 import type { FindResult, Street } from '../types';
@@ -44,12 +44,20 @@ export function liveScreen(root: HTMLElement) {
   const rightEl = h('div', { class: 'lt-side lt-right' });
   const previewEl = h('div', { class: 'lt-preview' }, leftEl, rightEl);
   const msgEl = h('div', { class: 'lt-msg' });
+  // Hinweis vor schwer erreichbaren Zielen (Einfahrt, zweite Reihe, Hof): oben, wo der Blick hingeht
+  const hintIcon = h('div', { class: 'hint-ic' });
+  const hintTitle = h('div', { class: 'hint-title' });
+  const hintDetail = h('div', { class: 'hint-detail' });
+  const hintDist = h('div', { class: 'hint-dist' });
+  const hintEl = h('div', { class: 'lt-hint', role: 'status' }, hintIcon, h('div', { class: 'hint-text' }, hintTitle, hintDetail), hintDist);
+  hintEl.hidden = true;
   const deniedEl = locationDeniedBox(true);
   const head = h(
     'header',
     { class: 'live-top hud' },
     h('div', { class: 'lt-row1' }, h('div', { class: 'lt-name' }, nameBtn), gpsEl),
     previewEl,
+    hintEl,
     msgEl,
     deniedEl,
   );
@@ -94,7 +102,27 @@ export function liveScreen(root: HTMLElement) {
     menuBtn.setAttribute('aria-label', st.attention ? 'Menü (Hinweis)' : 'Menü');
   };
   const bar = h('footer', { class: 'live-bar' }, searchBtn, hereBtn, menuBtn);
-  const bottom = h('div', { class: 'live-bottom' }, targetCard, bar);
+
+  // Tagesstart: „Heute zuerst: Teil A | Teil B“ – ein Tipp, nur im Stand und nur bis zur Wahl
+  // (oder bis zum Losfahren; dann gilt die Wahl vom letzten Mal)
+  let dayBarGone = false;
+  const dayBtn = (p: Part) =>
+    h('button', { class: 'day-btn', onClick: () => void chooseFirst(p) }, h('b', null, `Teil ${p}`), h('small', null, 'zuerst'));
+  const dayBar = h('div', { class: 'day-bar hud', role: 'group', 'aria-label': 'Heute zuerst' }, h('div', { class: 'day-cap' }, 'Heute zuerst?'), dayBtn('A'), dayBtn('B'));
+  const chooseFirst = async (p: Part) => {
+    await setFirst(p);
+    dayBarGone = true;
+    renderDayBar(gps.fix);
+    toast(`Heute zuerst: Teil ${p}`);
+    refresh();
+  };
+  const renderDayBar = (fix: Fix | null) => {
+    if (fix && fix.speed !== null && fix.speed > DRIVING_SPEED) dayBarGone = true;
+    dayBar.hidden = dayBarGone || !firstChoiceDue();
+  };
+  const unsubTour = onTourChange(() => renderDayBar(gps.fix));
+
+  const bottom = h('div', { class: 'live-bottom' }, dayBar, targetCard, bar);
   map.controls.append(zoomIn, zoomOut, viewBtn, recenterBtn);
   recenterBtn.hidden = true;
 
@@ -144,11 +172,22 @@ export function liveScreen(root: HTMLElement) {
   };
 
   // ---------- Darstellung ----------
+  // Pro GPS-Position nur ändern, was sich wirklich geändert hat (spart Layout und Akku)
+  const zuletzt = new WeakMap<Element, string>();
+  const unveraendert = (el: Element, key: string) => {
+    if (zuletzt.get(el) === key) return true;
+    zuletzt.set(el, key);
+    return false;
+  };
+  const setText = (el: HTMLElement, text: string) => {
+    if (el.textContent !== text) el.textContent = text;
+  };
   const numText = (u: Upcoming) => (u.n.user ? `•${u.n.label}` : u.n.label);
   const numCls = (u: Upcoming) => (u.n.source === 'osm-interp' ? ' est' : '') + (u.n.user ? ' user' : '');
   /** Entfernung zum nächsten Haus: „jetzt“, wenn man daneben ist, sonst in 5-m-Schritten */
   const distText = (ahead: number) => (ahead <= 6 ? 'jetzt' : `${Math.max(10, Math.round(ahead / 5) * 5)} m`);
   const sideCard = (el: HTMLElement, side: 'left' | 'right', list: Upcoming[], wait = false) => {
+    if (unveraendert(el, JSON.stringify([wait, list.map((u) => [numText(u), numCls(u), distText(u.ahead)])]))) return;
     const [first, ...rest] = list;
     const cap = h('div', { class: 'lt-cap' }, side === 'left' ? '◀ LINKS' : 'RECHTS ▶');
     if (!first) {
@@ -184,20 +223,24 @@ export function liveScreen(root: HTMLElement) {
       streetEl.textContent = 'Kein Standort';
       placeEl.textContent = '';
       gpsEl.replaceChildren();
+      zuletzt.delete(gpsEl);
       previewEl.hidden = true;
       msgEl.hidden = true;
       return null;
     }
     // GPS-Genauigkeit: immer sichtbar, ab 15 m deutlicher Hinweis
-    if (!fix) {
-      gpsEl.className = 'lt-gps warn';
-      gpsEl.replaceChildren(icon('locate', 16), 'GPS sucht …');
-    } else if (fix.accuracy > GPS_WARN_M) {
-      gpsEl.className = 'lt-gps warn';
-      gpsEl.replaceChildren(icon('warn', 16), `ungenau ±${Math.round(fix.accuracy)} m`);
-    } else {
-      gpsEl.className = 'lt-gps';
-      gpsEl.replaceChildren(h('span', { class: 'gps-dot' }), `GPS ±${Math.round(fix.accuracy)} m`);
+    const gpsKey = !fix ? 'sucht' : fix.accuracy > GPS_WARN_M ? `warn${Math.round(fix.accuracy)}` : `ok${Math.round(fix.accuracy)}`;
+    if (!unveraendert(gpsEl, gpsKey)) {
+      if (!fix) {
+        gpsEl.className = 'lt-gps warn';
+        gpsEl.replaceChildren(icon('locate', 16), 'GPS sucht …');
+      } else if (fix.accuracy > GPS_WARN_M) {
+        gpsEl.className = 'lt-gps warn';
+        gpsEl.replaceChildren(icon('warn', 16), `ungenau ±${Math.round(fix.accuracy)} m`);
+      } else {
+        gpsEl.className = 'lt-gps';
+        gpsEl.replaceChildren(h('span', { class: 'gps-dot' }), `GPS ±${Math.round(fix.accuracy)} m`);
+      }
     }
     const st = m?.street ?? null;
     if (!st) {
@@ -215,12 +258,12 @@ export function liveScreen(root: HTMLElement) {
       );
       return null;
     }
-    streetEl.textContent = st.name;
+    setText(streetEl, st.name);
     streetEl.classList.toggle('long', st.name.length > 18);
     // Tour: Teil und nächste Straße der heutigen Reihenfolge
     const t = inTour(st);
     const next = t ? nextTourStreet(state.index, st) : null;
-    placeEl.textContent = [st.place, t ? `Tour ${t.part}` : '', next ? `danach ${next.street.name}` : ''].filter(Boolean).join(' · ');
+    setText(placeEl, [st.place, t ? `Tour ${t.part}` : '', next ? `danach ${next.street.name}` : ''].filter(Boolean).join(' · '));
     const p = upcomingNumbers(matcher, m);
     if (!p) {
       if (st.numbers.length) {
@@ -243,6 +286,18 @@ export function liveScreen(root: HTMLElement) {
     return p;
   };
 
+  const renderHint = (hint: AccessHint | null) => {
+    hintEl.hidden = !hint;
+    if (!hint || unveraendert(hintEl, JSON.stringify([hint.title, hint.detail, hint.side, hint.now, Math.round(hint.distance / 5)]))) return;
+    const k = hint.side === 'left' ? 'l' : hint.side === 'right' ? 'r' : 'n';
+    hintEl.className = `lt-hint hint-${k}${hint.now ? ' now' : ''}`;
+    hintIcon.replaceChildren(icon(hint.side === 'left' ? 'turnLeft' : hint.side === 'right' ? 'turnRight' : 'straight', 28));
+    hintTitle.textContent = hint.title;
+    hintDetail.textContent = hint.detail;
+    hintDetail.hidden = !hint.detail;
+    hintDist.textContent = hint.now ? 'JETZT' : `${Math.max(5, Math.round(hint.distance / 5) * 5)} m`;
+  };
+
   type DirKind = 'right' | 'left' | 'straight' | 'behind' | 'here' | 'wait' | 'other';
   const ICONS: Record<DirKind, IconName> = {
     right: 'turnRight',
@@ -254,6 +309,7 @@ export function liveScreen(root: HTMLElement) {
     other: 'flag',
   };
   const paint = (kind: DirKind, dist: string, label: string) => {
+    if (unveraendert(targetCard, `${kind}|${dist}|${label}`)) return;
     targetCard.className = `live-target dircard dir-${kind}`;
     tIcon.replaceChildren(icon(ICONS[kind], 30));
     tDist.textContent = dist;
@@ -267,6 +323,7 @@ export function liveScreen(root: HTMLElement) {
     targetCard.hidden = !t || !tStreet;
     hereBtn.hidden = !t || !tStreet || !t.number;
     if (!t || !tStreet || !tRes) {
+      renderHint(null);
       map.update({ target: null, driveway: null, neighbors: [], focus: m?.street ?? null });
       return;
     }
@@ -285,10 +342,10 @@ export function liveScreen(root: HTMLElement) {
     if (off !== null && off > 20) tags.push(h('span', { class: 'tag' }, `${Math.round(off)} m von der Straße`));
     if (tDrive?.user) tags.push(h('span', { class: 'tag tag-y' }, '• Einfahrt selbst gesetzt'));
     if (tRes.status === 'street') tags.push(h('span', { class: 'tag tag-y' }, 'Nr. unbekannt – Straßenmitte'));
-    tTags.replaceChildren(...tags);
+    if (!unveraendert(tTags, tags.map((t) => `${t.className}:${t.textContent}`).join('|'))) tTags.replaceChildren(...tags);
     const info = t.number ? getHouseInfo(houseKey(tStreet, t.number)) : undefined;
     tInfo.hidden = !t.number;
-    tInfo.textContent = info && !isEmpty(info) ? summarize(info).join(' ') : '+ Haus-Info';
+    setText(tInfo, info && !isEmpty(info) ? summarize(info).join(' ') : '+ Haus-Info');
     tInfo.classList.toggle('empty', !info || isEmpty(info));
 
     const ti: TargetInfo | null = Number.isFinite(tRes.lat)
@@ -299,6 +356,7 @@ export function liveScreen(root: HTMLElement) {
           tDrive ? { junction: tDrive.junction as [number, number], away: (tDrive.line[1] ?? tDrive.line[0]) as [number, number] } : null,
         )
       : null;
+    renderHint(accessHint(ti, { offStreet: off, access: info?.access ?? null }));
     const via = ti?.viaDriveway ? 'EINFAHRT ' : '';
     if (!Number.isFinite(tRes.lat)) paint('wait', '?', 'LAGE UNBEKANNT');
     else if (!ti) paint('wait', '…', 'WARTE AUF GPS');
@@ -317,7 +375,7 @@ export function liveScreen(root: HTMLElement) {
     map.update({
       target: Number.isFinite(tRes.lat) ? { lat: tRes.lat, lon: tRes.lon, label: t.number || '•', estimated: tRes.estimated } : null,
       neighbors: tRes.estimated ? tRes.neighbors : [],
-      driveway: tDrive ? { line: tDrive.line as [number, number][], user: tDrive.user } : null,
+      driveway: tDrive ? { line: tDrive.line as [number, number][], user: tDrive.user, side: ti?.viaDriveway ? ti.side : null } : null,
       focus: tStreet,
     });
   };
@@ -329,7 +387,7 @@ export function liveScreen(root: HTMLElement) {
       b.toggleAttribute('disabled', driving);
       b.classList.toggle('locked', driving);
     }
-    searchBtn.lastElementChild!.textContent = driving ? 'Nur im Stand' : 'Nr. suchen';
+    setText(searchBtn.lastElementChild as HTMLElement, driving ? 'Nur im Stand' : 'Nr. suchen');
   };
 
   const renderAll = (m: Match | null, fix: Fix | null) => {
@@ -337,6 +395,7 @@ export function liveScreen(root: HTMLElement) {
     const p = renderHead(m, fix);
     renderTarget(m);
     renderInputs(fix);
+    renderDayBar(fix);
     map.update({
       car: m ? { pos: m.pos, bearing: m.bearing, accuracy: m.accuracy, speed: fix?.speed ?? null } : null,
       user: fix,
@@ -344,7 +403,6 @@ export function liveScreen(root: HTMLElement) {
       emphasis: matcher.preferred,
       houses: houseMarks(matcher, m, p),
     });
-    measure();
   };
 
   // ---------- Bedienung ----------
@@ -398,6 +456,7 @@ export function liveScreen(root: HTMLElement) {
   return () => {
     unsub();
     unsubStatus();
+    unsubTour();
     ro.disconnect();
   };
 }
@@ -407,6 +466,34 @@ function openMenu() {
   const item = (ic: IconName, label: string, fn: () => void, note = '') =>
     h('button', { class: 'menu-item', onClick: () => (close(), fn()) }, icon(ic, 26), h('span', null, label, note ? h('small', { class: 'menu-note' }, note) : null));
   const statusEl = h('div', { class: 'status-list' });
+  // „Heute zuerst“ direkt oben: ein Tipp wählt und schließt das Menü
+  const firstPart = getTour().first;
+  const firstEl = hasBothParts()
+    ? h(
+        'div',
+        { class: 'menu-first', role: 'group', 'aria-label': 'Heute zuerst' },
+        h('div', { class: 'set-label' }, 'Heute zuerst'),
+        h(
+          'div',
+          { class: 'seg' },
+          ...(['A', 'B'] as Part[]).map((p) =>
+            h(
+              'button',
+              {
+                class: 'seg-btn' + (firstPart === p ? ' on' : ''),
+                'aria-pressed': String(firstPart === p),
+                onClick: async () => {
+                  close();
+                  await setFirst(p);
+                  toast(`Heute zuerst: Teil ${p}`);
+                },
+              },
+              `Teil ${p}`,
+            ),
+          ),
+        ),
+      )
+    : null;
   const tourItem = item('list', 'Meine Tour', () => show('tour'), tourSuggestions(state.index).length ? 'Vorschlag: oft genutzte Straße' : '');
   const dataItem = item('data', 'Eigene Daten & Sicherung', () => show('data'));
   const regionsItem = item('map', 'Gebiete laden / aktualisieren', () => show('regions'));
@@ -415,6 +502,7 @@ function openMenu() {
       'div',
       { class: 'dialog menu' },
       statusEl,
+      firstEl,
       tourItem,
       regionsItem,
       dataItem,

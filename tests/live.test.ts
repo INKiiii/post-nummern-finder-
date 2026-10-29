@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { townPackages } from './town.mjs';
 import { buildIndex } from '../src/core';
 import { StreetMatcher, type GpsInput, type Match } from '../src/matcher';
-import { houseMarks, upcomingNumbers, targetInfo } from '../src/preview';
+import { accessHint, houseMarks, upcomingNumbers, targetInfo, type TargetInfo } from '../src/preview';
 import { findHouse, drivewayFor } from '../src/core';
 import { makeProjection } from '../src/core';
 import { SYNTH_ORIGIN } from '../scripts/lib/synthetic.mjs';
@@ -281,5 +281,35 @@ describe('Ziel und Vorbeifahr-Warnung', () => {
     const info = targetInfo(m, res[res.length - 1], { lat: r.lat, lon: r.lon, street: b })!;
     expect(info.kind).toBe('other');
     expect(info.side).toBeNull();
+  });
+});
+
+describe('Hinweis vor schwer erreichbaren Zielen (Kopf)', () => {
+  const ti = (o: Partial<TargetInfo> = {}): TargetInfo => ({ kind: 'ahead', distance: 120, side: 'left', viaDriveway: false, ...o });
+  it('bekannte Einfahrt: „EINFAHRT LINKS“ mit Entfernung, kurz davor „JETZT“', () => {
+    const h = accessHint(ti({ viaDriveway: true, distance: 120 }), { offStreet: 70, access: null })!;
+    expect(h.title).toBe('EINFAHRT LINKS');
+    expect(h.detail).toBe('Haus 70 m von der Straße');
+    expect(h.side).toBe('left');
+    expect(h.now).toBe(false);
+    expect(accessHint(ti({ viaDriveway: true, distance: 10 }), { offStreet: 70, access: null })!.now).toBe(true);
+  });
+  it('Haus-Info „über den Hof“ und zweite Reihe ohne Einfahrt', () => {
+    expect(accessHint(ti({ side: 'right' }), { offStreet: 8, access: 'über den Hof' })!.title).toBe('ZUGANG ÜBER DEN HOF');
+    const zr = accessHint(ti({ side: 'right' }), { offStreet: 45, access: 'lange Auffahrt' })!;
+    expect(zr.title).toBe('LANGE AUFFAHRT');
+    expect(zr.detail).toBe('Haus 45 m von der Straße');
+    const nur = accessHint(ti({ side: 'right' }), { offStreet: 45, access: null })!;
+    expect(nur.title).toBe('ZWEITE REIHE RECHTS');
+    const mitInfo = accessHint(ti({ viaDriveway: true }), { offStreet: 45, access: 'Zugang von hinten' })!;
+    expect(mitInfo.detail).toBe('Haus 45 m von der Straße · Haus-Info: Zugang von hinten');
+  });
+  it('kein Hinweis: Haus direkt an der Straße, Ziel zu weit, vorbei oder andere Straße', () => {
+    expect(accessHint(ti(), { offStreet: 8, access: null })).toBeNull();
+    expect(accessHint(ti(), { offStreet: 8, access: 'direkt an der Straße' })).toBeNull();
+    expect(accessHint(ti({ viaDriveway: true, distance: 450 }), { offStreet: 70, access: null })).toBeNull();
+    expect(accessHint(ti({ viaDriveway: true, kind: 'passed' }), { offStreet: 70, access: null })).toBeNull();
+    expect(accessHint(ti({ viaDriveway: true, kind: 'other' }), { offStreet: 70, access: null })).toBeNull();
+    expect(accessHint(null, { offStreet: 70, access: null })).toBeNull();
   });
 });

@@ -272,16 +272,20 @@ try {
       window.__renders = 0;
       new MutationObserver(() => window.__renders++).observe(svg, { childList: true });
     });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const layouts = async () => (await cdp.send('Performance.getMetrics')).metrics.find((x) => x.name === 'LayoutCount').value;
+    const l0 = await layouts();
     await fixAt(-782);
     const glide = await page.evaluate(
       () =>
         new Promise((done) => {
-          const svg = document.querySelector('.screen-live .map-svg');
+          const ebene = document.querySelector('.screen-live .map-layer');
           const tf = new Set();
           const cars = [];
           const t0 = performance.now();
           const step = () => {
-            tf.add(svg.style.transform);
+            tf.add(ebene.style.transform);
             const r = document.querySelector('.map-car').getBoundingClientRect();
             cars.push(r.top);
             if (performance.now() - t0 < 600) requestAnimationFrame(step);
@@ -290,6 +294,8 @@ try {
           requestAnimationFrame(step);
         }),
     );
+    const nLayout = (await layouts()) - l0;
+    check('Gleiten ist akkuschonend: kein Layout je Bild (nur beim Neuzeichnen)', nLayout <= 8, `${nLayout} Layouts in ${glide.stufen} Bildern`);
     check('Karte gleitet zwischen zwei Positionen (Fahrzeug bleibt stehen)', glide.stufen >= 10 && glide.carSpan < 1.5 && glide.renders <= 1, `${glide.stufen} Zwischenstellungen, Fahrzeug ±${glide.carSpan.toFixed(1)} px, ${glide.renders}× neu gezeichnet`);
     // Anhalten: Die Vorausberechnung wird einmal zurückgenommen, danach steht alles
     await stand(page, -782, -3, 4, 8);
@@ -309,6 +315,8 @@ try {
     await drive(page, [[-680, -3], [-450, -3]], { speed: 6, step: 6 });
     const side = await text(page, '.live-target .side');
     check('Zweite Reihe: Führung zur Einfahrt links', side === 'EINFAHRT LINKS', `${await text(page, '.live-target .dist')} ${side}`);
+    const hinweis = await text(page, '.lt-hint:not([hidden]) .hint-title');
+    check('Zweite Reihe: Hinweis oben im Kopf „EINFAHRT LINKS“ mit Entfernung', hinweis === 'EINFAHRT LINKS' && /\d+ m|JETZT/.test(await text(page, '.lt-hint .hint-dist')) && (await page.locator('.jn-l circle.junction').count()) === 1, `${hinweis} ${await text(page, '.lt-hint .hint-dist')}`);
     check('Eingabesperre bei Fahrt: „Nr. suchen“ gesperrt', await page.locator('.lb-search').isDisabled(), await text(page, '.lb-search'));
     await drive(page, [[-450, -3], [-400, -3]], { speed: 1, step: 5 });
     check('Im Stand: „Nr. suchen“ wieder frei', !(await page.locator('.lb-search').isDisabled()));
@@ -328,6 +336,30 @@ try {
     await drive(page, [[-400, -3], [-330, -3]], { speed: 1.2, step: 6 });
     const passed = await text(page, '.live-target .dist');
     check('Vorbeigefahren: „Zurück … m“ in Warnfarbe', /^Zurück \d+ m$/.test(passed) && (await page.locator('.live-target.dir-behind').count()) === 1, passed);
+    await ctx.close();
+  }
+
+  // 3b. Tagestour: „Heute zuerst“ mit einem Tipp (Leiste beim Start, oben im Menü)
+  {
+    const { ctx, page } = await freshPage();
+    await drive(page, [[-760, -3], [-740, -3]], { speed: 1, step: 4 });
+    await page.click('.menu-btn');
+    await page.click('text=Meine Tour');
+    await page.waitForSelector('.screen-tour');
+    for (const [q, teil] of [['Elbufer', '+ A'], ['Blumen', '+ B']]) {
+      await page.fill('.screen-tour input.search', q);
+      await page.locator('.tour-add .chip', { hasText: teil }).first().click();
+    }
+    await page.click('text=Zurück');
+    await page.waitForSelector('.screen-live');
+    await stand(page, -740, -3, 3);
+    const sichtbar = await page.locator('.day-bar').isVisible();
+    await page.locator('.day-btn', { hasText: 'Teil B' }).click();
+    await page.waitForTimeout(200);
+    const weg = !(await page.locator('.day-bar').isVisible());
+    await page.click('.menu-btn');
+    const imMenu = await text(page, '.menu-first .seg-btn.on');
+    check('Tagestour: Leiste „Heute zuerst?“ beim Start, ein Tipp wählt Teil B', sichtbar && weg && imMenu === 'Teil B', `Leiste ${sichtbar ? 'da' : 'fehlt'}, danach ${weg ? 'weg' : 'noch da'}, Menü: ${imMenu}`);
     await ctx.close();
   }
 

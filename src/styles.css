@@ -259,6 +259,20 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .lt-num.user { text-decoration: underline; text-decoration-thickness: 3px; }
 .lt-dot { margin: 0 4px; opacity: 0.45; }
 .lt-none { font-size: 18px; font-weight: 800; color: var(--hud-muted); line-height: 47px; }
+/* Hinweis vor schwer erreichbaren Zielen: groß, in der Farbe der Seite */
+.lt-hint {
+  margin-top: 8px; border-radius: 16px; padding: 8px 12px 8px 8px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px; align-items: center; background: var(--yel); color: var(--on-yel);
+}
+.lt-hint.hint-l { background: var(--left); color: var(--on-left); }
+.lt-hint.hint-r { background: var(--right); color: var(--on-right); }
+.hint-ic { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, 0.18); }
+.hint-l .hint-ic { background: rgba(255, 255, 255, 0.22); }
+.hint-text { min-width: 0; }
+.hint-title { font-size: 21px; font-weight: 900; line-height: 1.1; letter-spacing: 0.2px; overflow-wrap: anywhere; }
+.hint-detail { font-size: 13px; font-weight: 800; opacity: 0.85; margin-top: 2px; }
+.hint-dist { font-size: 24px; font-weight: 900; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lt-hint.now .hint-dist { font-size: 19px; letter-spacing: 0.5px; padding: 4px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.22); }
 .lt-msg { margin-top: 8px; font-size: 17px; font-weight: 800; }
 .lt-msg-btn { border: 0; background: var(--yel); color: #000; border-radius: 14px; padding: 8px 12px; font-weight: 900; font-size: 17px; }
 .live-top .loc-denied { margin-top: 8px; color: var(--text); }
@@ -311,6 +325,19 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .tag-w { background: #000; color: #fff; border-color: #000; }
 .lt-info { border-style: dashed; border-color: #000; color: #000; }
 .lt-info:not(.empty) { border-style: solid; text-align: left; }
+
+/* Tagesstart: Heute zuerst Teil A oder B (ein Tipp) */
+.day-bar { border-radius: 22px; padding: 8px; display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; align-items: center; }
+.day-cap { font-size: 16px; font-weight: 900; padding: 0 6px 0 8px; }
+.day-btn {
+  min-height: 56px; border-radius: 16px; border: 0; background: var(--yel); color: var(--on-yel);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05;
+}
+.day-btn b { font-size: 21px; font-weight: 900; }
+.day-btn small { font-size: 13px; font-weight: 800; opacity: 0.75; }
+.menu-first { display: flex; flex-direction: column; gap: 2px; }
+.menu-first .set-label { margin-top: 0; }
+.menu-first .seg-btn { min-height: 60px; font-size: 21px; font-weight: 900; }
 
 /* Leiste unten: schwebende Knöpfe */
 .live-bar { display: flex; gap: 8px; align-items: center; }
@@ -444,7 +471,9 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
   position: absolute; z-index: 3; left: calc(var(--map-left, 0px) + 10px + env(safe-area-inset-left)); bottom: calc(var(--map-bottom, 0px) + 6px);
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; pointer-events: none;
 }
-.map-live .map-svg { will-change: transform; }
+.map-layer { position: absolute; inset: 0; }
+/* Nur die Ebene wird bewegt (Grafikchip); das SVG darin bleibt still */
+.map-live .map-layer { will-change: transform; }
 /* Fahrzeug: eigene Ebene über der Karte, gleitet mit */
 .map-car { position: absolute; z-index: 2; left: 0; top: 0; width: 52px; height: 52px; margin: -26px 0 0 -26px; pointer-events: none; will-change: transform; }
 .map-car svg { display: block; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5)); }
@@ -499,10 +528,22 @@ h3 { font-size: 20px; margin: 18px 0 8px; }
 .nb { fill: none; stroke: var(--orange); stroke-width: 3; }
 .draft { fill: none; stroke: var(--user); stroke-width: 5; stroke-dasharray: 10 6; }
 .draft-pt { fill: var(--user); stroke: #000; stroke-width: 2; }
-.drive { fill: none; stroke: var(--text); stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 9 7; }
-.drive-user { stroke-dasharray: 3 6; }
-.junction { fill: #fff; stroke: #000; stroke-width: 2; }
-.junction-label { fill: #000; font-size: 17px; font-weight: 900; text-anchor: middle; }
+/* Zufahrt zum Ziel: in der Farbe ihrer Seite mit hellem Rand; selbst gesetzt gestrichelt */
+.drive-case { fill: none; stroke: var(--hn-halo); stroke-linecap: round; stroke-linejoin: round; }
+.drive { fill: none; stroke: var(--yel); stroke-linecap: round; stroke-linejoin: round; }
+.drive-l { stroke: var(--left); }
+.drive-r { stroke: var(--right); }
+.drive-user { stroke-dasharray: 2 9; }
+.junction { fill: var(--yel); stroke: #fff; stroke-width: 3; }
+.jn-l .junction, .jn-l .junction-arrow { fill: var(--left); }
+.jn-r .junction, .jn-r .junction-arrow { fill: var(--right); }
+.junction-arrow { stroke: #fff; stroke-width: 2.5; stroke-linejoin: round; }
+.junction-label { fill: #000; font-size: 18px; font-weight: 900; text-anchor: middle; }
+.jn-l .junction-label { fill: #fff; }
+/* weitere bekannte Einfahrten der Straße */
+.drive-other { fill: none; stroke: var(--hn-other-text); stroke-linecap: round; stroke-dasharray: 3 6; opacity: 0.8; }
+.junction-other { fill: var(--map-bg); stroke: var(--hn-other-text); stroke-width: 2; }
+.junction-other-label { fill: var(--hn-other-text); font-size: 10px; font-weight: 900; text-anchor: middle; }
 .edge-arrow-head { fill: var(--yel); stroke: #000; stroke-width: 3; stroke-linejoin: round; }
 .edge-pill { fill: #000; stroke: var(--yel); stroke-width: 2; }
 .edge-label { fill: var(--yel); font-size: 18px; font-weight: 900; text-anchor: middle; }

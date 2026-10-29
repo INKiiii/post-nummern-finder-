@@ -3,10 +3,15 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { townPackages } from './town.mjs';
-import { buildIndex, makeProjection } from '../src/core';
+import { buildIndex, makeProjection, nearestStreets } from '../src/core';
 import {
   _setState,
+  activePart,
+  activePartIds,
   addToTour,
+  firstChoiceDue,
+  hasBothParts,
+  noteStreet,
   countUse,
   getTour,
   move,
@@ -22,7 +27,7 @@ import {
 import { StreetMatcher } from '../src/matcher';
 import { streetGaps } from '../src/gaps';
 import { SYNTH_ORIGIN } from '../scripts/lib/synthetic.mjs';
-import type { Index } from '../src/types';
+import type { Index, Street } from '../src/types';
 
 let index: Index;
 const street = (name: string) => [...index.streets.values()].find((s) => s.name === name)!;
@@ -68,6 +73,54 @@ describe('Meine Tour', () => {
     const m = new StreetMatcher(() => index);
     m.preferred = tourStreetIds(index);
     expect(m.update({ lat, lon, accuracy: 8, course: null, speed: 0, time: 1 }).street?.name).toBe('Schilfring');
+  });
+
+  it('Heute zuerst: Wahl einmal am Tag, gilt sofort für Reihenfolge und aktiven Teil', async () => {
+    await addToTour(street('Elbuferstraße'), 'A');
+    expect(hasBothParts()).toBe(false);
+    expect(firstChoiceDue()).toBe(false); // nur ein Teil: nichts zu wählen
+    await addToTour(street('Blumenstraße'), 'B');
+    const day = new Date(2026, 9, 29, 7, 30);
+    expect(firstChoiceDue(day)).toBe(true);
+    await setFirst('B', day);
+    expect(firstChoiceDue(day)).toBe(false);
+    expect(firstChoiceDue(new Date(2026, 9, 30, 7, 30))).toBe(true); // am nächsten Tag wieder fragen
+    expect(orderedTour()[0].name).toBe('Blumenstraße');
+    expect(activePart()).toBe('B');
+    expect([...activePartIds(index)]).toEqual([street('Blumenstraße').id]);
+    // Fährt man in Teil A, folgt der Vorrang dorthin
+    expect(noteStreet(street('Elbuferstraße'))).toBe(true);
+    expect(activePart()).toBe('A');
+    expect(noteStreet(street('Elbuferstraße'))).toBe(false);
+    expect(noteStreet(null)).toBe(false);
+    // Neue Wahl setzt wieder auf den gewählten Teil
+    await setFirst('B', day);
+    expect(activePart()).toBe('B');
+  });
+
+  it('Straßenbezug: an einer unklaren Stelle gewinnt die Straße des aktiven Teils', async () => {
+    const proj = makeProjection(SYNTH_ORIGIN[0], SYNTH_ORIGIN[1]);
+    // Eine Stelle suchen, an der zwei Straßen fast gleich weit weg sind (GPS kann beides meinen)
+    let pt: { lat: number; lon: number; a: Street; b: Street } | null = null;
+    for (let dx = -40; dx <= 40 && !pt; dx++)
+      for (let dy = -40; dy <= 40 && !pt; dy++) {
+        const [la, lo] = proj.toLatLon(205 + dx, 190 + dy);
+        const n = nearestStreets(index, la, lo, 60, 2);
+        if (n.length === 2 && n[0].dist < 20 && Math.abs(n[0].dist - n[1].dist) < 1.5) pt = { lat: la, lon: lo, a: n[0].street, b: n[1].street };
+      }
+    expect(pt).not.toBeNull();
+    const { lat, lon, a, b } = pt!;
+    await addToTour(a, 'A');
+    await addToTour(b, 'B');
+    const run = async (first: 'A' | 'B') => {
+      await setFirst(first);
+      const m = new StreetMatcher(() => index);
+      m.preferred = tourStreetIds(index);
+      m.activePart = activePartIds(index);
+      return m.update({ lat, lon, accuracy: 8, course: null, speed: 0, time: 1 }).street?.name;
+    };
+    expect(await run('A')).toBe(a.name);
+    expect(await run('B')).toBe(b.name);
   });
 
   it('schlägt oft genutzte Straßen vor (nur Name, ab 3 Tagen, einmal pro Tag)', async () => {

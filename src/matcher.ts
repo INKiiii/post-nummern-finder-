@@ -86,6 +86,8 @@ export class StreetMatcher {
   private forcedId: string | null = null;
   /** Bevorzugte Straßen (Meine Tour) */
   preferred = new Set<string>();
+  /** Tour-Straßen des Teils, in dem man gerade fährt: leichter zusätzlicher Vorrang */
+  activePart = new Set<string>();
 
   constructor(private getIndex: () => Index) {}
 
@@ -249,6 +251,7 @@ export class StreetMatcher {
       if (!c || c.dist > (st.id === this.forcedId ? Math.max(80, maxD) : maxD)) continue;
       let score = c.dist;
       if (this.preferred.size && !this.preferred.has(st.id)) score += 8;
+      else if (this.activePart.size && !this.activePart.has(st.id)) score += 4;
       if (kursWahl !== null) {
         const tb = bearingOf(c.tangent[0], c.tangent[1]);
         score += 12 * Math.abs(Math.sin((angleDiff(kursWahl, tb) * Math.PI) / 180));

@@ -21,6 +21,8 @@ export interface TourStreet {
 export interface Tour {
   streets: TourStreet[];
   first: Part;
+  /** Tag (JJJJ-MM-TT), an dem „Heute zuerst“ zuletzt gewählt wurde */
+  firstDay?: string;
 }
 
 export interface StreetUse {
@@ -34,6 +36,8 @@ export interface StreetUse {
 export const SUGGEST_DAYS = 3;
 
 let tour: Tour = { streets: [], first: 'A' };
+/** Teil der zuletzt befahrenen Tour-Straße (null: noch keine; dann gilt „heute zuerst“) */
+let lastPart: Part | null = null;
 let usage: Record<string, StreetUse> = {};
 const listeners = new Set<() => void>();
 
@@ -128,9 +132,58 @@ export async function move(t: TourStreet, delta: -1 | 1) {
   await save();
 }
 
-export async function setFirst(part: Part) {
+const today = (now = new Date()) => {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+};
+
+/** „Heute zuerst: A oder B“ – ein Tipp. Die Fahrreihenfolge und der Vorrang folgen sofort. */
+export async function setFirst(part: Part, now = new Date()) {
   tour.first = part;
+  tour.firstDay = today(now);
+  lastPart = null;
   await save();
+}
+
+/** Die Tour hat Straßen in beiden Teilen (nur dann gibt es etwas zu wählen). */
+export function hasBothParts(): boolean {
+  return tour.streets.some((t) => t.part === 'A') && tour.streets.some((t) => t.part === 'B');
+}
+
+/** Zum Tagesbeginn fragen: Tour mit A und B, heute noch nicht gewählt. */
+export function firstChoiceDue(now = new Date()): boolean {
+  return hasBothParts() && tour.firstDay !== today(now);
+}
+
+/**
+ * Teil, in dem man gerade fährt: zu Beginn der heute zuerst gewählte, danach der Teil der
+ * zuletzt befahrenen Tour-Straße. Seine Straßen haben im Straßenbezug leicht Vorrang.
+ */
+export function activePart(): Part {
+  return lastPart ?? tour.first;
+}
+
+/** Gerade befahrene Straße melden; gibt true zurück, wenn sich der aktive Teil geändert hat. */
+export function noteStreet(street: Street | null): boolean {
+  const t = street ? inTour(street) : null;
+  if (!t || t.part === activePart()) {
+    if (t) lastPart = t.part;
+    return false;
+  }
+  lastPart = t.part;
+  return true;
+}
+
+/** IDs der Tour-Straßen des aktiven Teils (für den Straßenbezug). */
+export function activePartIds(index: Index): Set<string> {
+  const part = activePart();
+  const ids = new Set<string>();
+  for (const t of tour.streets) {
+    if (t.part !== part) continue;
+    const s = resolveTourStreet(index, t);
+    if (s) ids.add(s.id);
+  }
+  return ids;
 }
 
 /** Nutzung zählen (höchstens einmal pro Tag und Straße). Nur der Name wird gespeichert. */
@@ -160,4 +213,5 @@ export function tourSuggestions(index: Index): Street[] {
 export function _setState(t: Tour, u: Record<string, StreetUse> = {}) {
   tour = t;
   usage = u;
+  lastPart = null;
 }

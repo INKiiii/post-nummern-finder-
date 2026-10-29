@@ -49,6 +49,8 @@ export interface MapTarget {
 export interface MapDriveway {
   line: [number, number][];
   user: boolean;
+  /** Seite der Einfahrt in Fahrtrichtung (färbt Linie und Marker), null: unbekannt */
+  side?: Side | null;
 }
 
 /** Fahrzeug, wie es angezeigt wird (auf die Straße bezogen) */
@@ -134,6 +136,8 @@ export class MapView {
   readonly root: HTMLDivElement;
   private canvas: HTMLDivElement;
   private svg: SVGSVGElement;
+  /** Ebene um das SVG: nur sie wird verschoben und gekippt (das SVG selbst zu bewegen kostet Layout) */
+  private layer: HTMLDivElement;
   private carEl: HTMLDivElement;
   private accEl: HTMLDivElement;
   private proj = makeProjection(53.3, 10.2);
@@ -147,6 +151,10 @@ export class MapView {
   private drawnKey = '';
   private dataKey = '';
   private svgSize = '';
+  /** Flächen von Knöpfen und Maßstab auf der Karte (gemerkt; neu bei Größen- oder Folgewechsel) */
+  private ctrlBoxes: number[][] | null = null;
+  private layerTf = '';
+  private carTf = '';
   private sz: { w: number; h: number } | null = null;
   private anim: { from: Cam; t0: number; dur: number; linear: boolean; turn: boolean } | null = null;
   private fit: { dur: number; linear: boolean; t0?: number } | null = null;
@@ -219,6 +227,9 @@ export class MapView {
     this.canvas = document.createElement('div');
     this.canvas.className = 'map-canvas';
     this.svg = el('svg', { class: 'map-svg' }) as SVGSVGElement;
+    this.layer = document.createElement('div');
+    this.layer.className = 'map-layer';
+    this.layer.appendChild(this.svg);
     this.accEl = document.createElement('div');
     this.accEl.className = 'map-acc';
     this.accEl.hidden = true;
@@ -230,7 +241,7 @@ export class MapView {
     this.carEl.innerHTML =
       '<svg viewBox="-26 -26 52 52" width="52" height="52"><circle class="car-halo" r="24"/><circle class="car-disc" r="17.5"/>' +
       '<path class="car-chev" d="M0 -11.5 L9.5 9 L0 4 L-9.5 9 Z"/><circle class="car-pt" r="6.5"/></svg>';
-    this.canvas.append(this.svg, this.accEl, this.carEl);
+    this.canvas.append(this.layer, this.accEl, this.carEl);
     this.root.appendChild(this.canvas);
 
     this.scaleEl = document.createElement('span');
@@ -293,6 +304,7 @@ export class MapView {
     );
     new ResizeObserver(() => {
       this.sz = null;
+      this.ctrlBoxes = null;
       this.requestFit(0);
     }).observe(this.canvas);
   }
@@ -391,6 +403,7 @@ export class MapView {
     left = Math.max(0, Math.round(left));
     if (top === this.insets.top && bottom === this.insets.bottom && left === this.insets.left) return;
     this.insets = { top, bottom, left };
+    this.ctrlBoxes = null;
     this.root.style.setProperty('--map-top', `${top}px`);
     this.root.style.setProperty('--map-bottom', `${bottom}px`);
     this.root.style.setProperty('--map-left', `${left}px`);
@@ -400,6 +413,7 @@ export class MapView {
   private setAuto(v: boolean) {
     if (this.auto === v) return;
     this.auto = v;
+    this.ctrlBoxes = null;
     this.centerBtn?.classList.toggle('active', !v);
     this.onFollowChange?.(v);
   }
@@ -448,6 +462,7 @@ export class MapView {
   /** Index-Inhalt geändert (z. B. eigener Punkt gesetzt): neu zeichnen. */
   refresh() {
     this.drawnKey = '';
+    this.ctrlBoxes = null;
     this.kick();
   }
 
@@ -748,6 +763,7 @@ export class MapView {
       [...d.emphasis].join('|'),
       d.draft?.length,
       d.driveway?.line.flat().join(','),
+      d.driveway?.side ?? '',
       d.neighbors.length,
       houses,
     ].join(';');
@@ -850,16 +866,14 @@ export class MapView {
   private applyTransform(w: number, h: number, P: Persp | null) {
     const d = this.drawn;
     if (!d) return;
-    if (P) {
-      this.svg.style.transform = matrix3d(mul3(homography(P), affine(screenMatrix(d, this.view))));
-      return;
+    let t = '';
+    if (P) t = matrix3d(mul3(homography(P), affine(screenMatrix(d, this.view))));
+    else if (!sameCam(d, this.view, w, h)) t = `matrix(${screenMatrix(d, this.view).map((v) => v.toFixed(5)).join(',')})`;
+    // nur schreiben, wenn sich etwas ändert (im Stand: gar nichts zu tun)
+    if (t !== this.layerTf) {
+      this.layerTf = t;
+      this.layer.style.transform = t;
     }
-    if (sameCam(d, this.view, w, h)) {
-      if (this.svg.style.transform) this.svg.style.transform = '';
-      return;
-    }
-    const m = screenMatrix(d, this.view);
-    this.svg.style.transform = `matrix(${m.map((v) => v.toFixed(5)).join(',')})`;
   }
 
   /** Fahrzeug (eigene Ebene über der Karte) an seine angezeigte Stelle setzen */
@@ -888,8 +902,12 @@ export class MapView {
       const [x2, y2] = scr(p.x + Math.sin(r) * 3, p.y + Math.cos(r) * 3);
       ang = (Math.atan2(x2 - x, y - y2) * 180) / Math.PI;
     }
-    this.carEl.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${ang.toFixed(1)}deg)`;
-    this.carEl.classList.toggle('no-heading', p.bearing === null);
+    const ct = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${ang.toFixed(1)}deg)`;
+    if (ct !== this.carTf) {
+      this.carTf = ct;
+      this.carEl.style.transform = ct;
+    }
+    if (this.carEl.classList.contains('no-heading') !== (p.bearing === null)) this.carEl.classList.toggle('no-heading', p.bearing === null);
     // Ungenauigkeit nur zeigen, wenn sie deutlich größer als das Fahrzeug ist
     const r = acc * this.view.scale * (P ? 1 / factorScreen(P, y) : 1);
     this.accEl.hidden = !(r > 30) || !!P;
@@ -1013,11 +1031,12 @@ export class MapView {
       this.svgSize = geo;
       svg.setAttribute('viewBox', `${-ovX} ${-ovTop} ${w + 2 * ovX} ${h + ovTop + ovB}`);
       if (this.ov) {
-        svg.style.left = `${-ovX}px`;
-        svg.style.top = `${-ovTop}px`;
-        svg.style.width = `${w + 2 * ovX}px`;
-        svg.style.height = `${h + ovTop + ovB}px`;
-        svg.style.transformOrigin = `${ovX}px ${ovTop}px`;
+        const ls = this.layer.style;
+        ls.left = `${-ovX}px`;
+        ls.top = `${-ovTop}px`;
+        ls.width = `${w + 2 * ovX}px`;
+        ls.height = `${h + ovTop + ovB}px`;
+        ls.transformOrigin = `${ovX}px ${ovTop}px`;
       }
     }
     svg.replaceChildren();
@@ -1091,22 +1110,37 @@ export class MapView {
     }
     if (driveway?.line.length) {
       const [x, y] = toS(driveway.line[0][0], driveway.line[0][1]);
-      reserve(x - 17, y - 17, x + 17, y + 17);
+      reserve(x - 30, y - 19, x + 30, y + 19);
+    }
+    // Weitere bekannte Einfahrten der Straße (klein, ohne Ziel): Marker an der Abzweigung
+    const sameAs = (a: [number, number], b: [number, number] | undefined) => !!b && Math.abs(a[0] - b[0]) < 1e-7 && Math.abs(a[1] - b[1]) < 1e-7;
+    const andere = (focus?.driveways ?? []).filter((d) => d.line.length >= 2 && !sameAs(d.line[0], driveway?.line[0]));
+    const andereS: [number, number][] = [];
+    for (const d of andere) {
+      const q = toS(d.line[0][0], d.line[0][1]);
+      if (!visible(q[0], q[1])) continue;
+      andereS.push(q);
+      reserve(q[0] - 10, q[1] - 10, q[0] + 10, q[1] + 10);
     }
     for (const n of neighbors) {
       const [x, y] = toS(n.lat, n.lon);
       reserve(x - 13, y - 34, x + 13, y + 13);
     }
     if (carS) reserve(carS[0] - 21, carS[1] - 22, carS[0] + 21, carS[1] + 21);
-    // Knöpfe und Maßstab auf der Karte freihalten
-    const cr = this.canvas.getBoundingClientRect();
-    for (const box of [this.controls, this.corner]) {
-      if (!box || !box.childElementCount) continue;
-      for (const c of box.children) {
-        const r = (c as HTMLElement).getBoundingClientRect();
-        if (r.width) reserve(r.left - cr.left - 6, r.top - cr.top - 6, r.right - cr.left + 6, r.bottom - cr.top + 6);
+    // Knöpfe und Maßstab auf der Karte freihalten (Lage gemerkt: kein Layout-Abfragen je Bild)
+    if (!this.ctrlBoxes) {
+      const boxes: number[][] = [];
+      const cr = this.canvas.getBoundingClientRect();
+      for (const box of [this.controls, this.corner]) {
+        if (!box || !box.childElementCount) continue;
+        for (const c of box.children) {
+          const r = (c as HTMLElement).getBoundingClientRect();
+          if (r.width) boxes.push([r.left - cr.left - 6, r.top - cr.top - 6, r.right - cr.left + 6, r.bottom - cr.top + 6]);
+        }
       }
+      this.ctrlBoxes = boxes;
     }
+    for (const b of this.ctrlBoxes) reserve(b[0], b[1], b[2], b[3]);
 
     // Ziel außerhalb des freien Bereichs: Pfeil am Rand mit Entfernung (Einfahrt zuerst, falls vorhanden)
     const inset = 34;
@@ -1230,9 +1264,14 @@ export class MapView {
         el('circle', { cx: x, cy: y, r: 8, class: 'st-start' }, gStreets);
       }
     }
-    // Zufahrt zum Haus mit markierter Abzweigung
+    // Weitere Einfahrten der Straße: dünn gestrichelt
+    for (const d of andere) el('path', { d: pathOf(d.line), class: 'drive-other', 'stroke-width': Math.max(2.5, streetW * 0.35) }, svg);
+    // Zufahrt zum Ziel: kräftig in der Farbe ihrer Seite, mit hellem Rand (auf jeder Karte sichtbar)
+    const dSide = driveway?.side === 'left' ? 'l' : driveway?.side === 'right' ? 'r' : 'n';
     if (driveway && driveway.line.length >= 2) {
-      el('path', { d: pathOf(driveway.line), class: 'drive' + (driveway.user ? ' drive-user' : ''), 'stroke-width': Math.max(4, streetW * 0.7) }, svg);
+      const dw = Math.max(5, streetW * 0.8);
+      el('path', { d: pathOf(driveway.line), class: 'drive-case', 'stroke-width': dw + 4 }, svg);
+      el('path', { d: pathOf(driveway.line), class: `drive drive-${dSide}` + (driveway.user ? ' drive-user' : ''), 'stroke-width': dw }, svg);
     }
 
     // ---------- Hausnummern: an jedem Haus, ohne Überlappung, nach Vorrang ----------
@@ -1534,11 +1573,22 @@ export class MapView {
         el('circle', { cx: x, cy: y, r: 7, class: 'draft-pt' }, svg);
       }
     }
+    for (const [x, y] of andereS) {
+      const g = bb(svg, x, y, { class: 'jn-other' });
+      el('circle', { r: 8, class: 'junction-other' }, g);
+      const t = el('text', { y: 3.6, class: 'junction-other-label' }, g);
+      t.textContent = 'E';
+    }
     if (driveway && driveway.line.length) {
+      // Abzweigung zum Ziel: „E“ in der Seitenfarbe, ein Pfeil zeigt zur Seite der Einfahrt
       const [x, y] = toS(driveway.line[0][0], driveway.line[0][1]);
-      const g = bb(svg, x, y);
-      el('circle', { r: 15, class: 'junction' }, g);
-      const t = el('text', { y: 6, class: 'junction-label' }, g);
+      const g = bb(svg, x, y, { class: `jn jn-${dSide}` });
+      if (dSide !== 'n') {
+        const k = dSide === 'l' ? -1 : 1;
+        el('path', { d: `M${k * 17} -9 L${k * 29} 0 L${k * 17} 9 Z`, class: 'junction-arrow' }, g);
+      }
+      el('circle', { r: 17, class: 'junction' }, g);
+      const t = el('text', { y: 6.5, class: 'junction-label' }, g);
       t.textContent = 'E';
     }
     if (target) {
