@@ -124,6 +124,55 @@ export function targetInfo(
   return { kind: 'ahead', distance: Math.max(0, along), side, viaDriveway: !!driveway };
 }
 
+/** Hinweis oben im Kopf, bevor man an einem schwer erreichbaren Ziel vorbeifährt */
+export interface AccessHint {
+  /** groß: „EINFAHRT LINKS“, „ZUGANG ÜBER DEN HOF“, „ZWEITE REIHE RECHTS“ … */
+  title: string;
+  /** klein darunter: „Haus 70 m von der Straße · Haus-Info: lange Auffahrt“ */
+  detail: string;
+  side: Side | null;
+  /** am Ziel bzw. an der Einfahrt (dann „JETZT“ statt Meter) */
+  now: boolean;
+  /** Meter bis zur Einfahrt bzw. zum Haus entlang der Straße */
+  distance: number;
+}
+
+/** Ab diesem Abstand zur Straße (m) liegt ein Haus in zweiter Reihe. */
+export const SECOND_ROW_M = 20;
+/** Der Hinweis erscheint ab so vielen Metern vor dem Ziel. */
+export const HINT_AHEAD_M = 300;
+
+const ACCESS_TITLE: Record<string, string> = {
+  'über den Hof': 'ZUGANG ÜBER DEN HOF',
+  'Zugang von hinten': 'ZUGANG VON HINTEN',
+  'Haus liegt hinten': 'HAUS LIEGT HINTEN',
+  'lange Auffahrt': 'LANGE AUFFAHRT',
+};
+
+/**
+ * Hinweis für Ziele, die man von der Straße aus leicht verpasst: bekannte Einfahrt, Haus in
+ * zweiter Reihe oder ein Zugang laut Haus-Info. Nur solange das Ziel vor einem liegt
+ * (höchstens 300 m) – danach übernimmt „Zurück … m“.
+ */
+export function accessHint(ti: TargetInfo | null, o: { offStreet: number | null; access: string | null }): AccessHint | null {
+  if (!ti || (ti.kind !== 'ahead' && ti.kind !== 'here') || ti.distance > HINT_AHEAD_M) return null;
+  const access = o.access && o.access !== 'direkt an der Straße' ? o.access : null;
+  const secondRow = o.offStreet !== null && o.offStreet > SECOND_ROW_M;
+  if (!ti.viaDriveway && !access && !secondRow) return null;
+  const seite = ti.side === 'left' ? 'LINKS' : ti.side === 'right' ? 'RECHTS' : '';
+  let title: string;
+  let accessUsed = false;
+  if (ti.viaDriveway) title = `EINFAHRT ${seite}`.trim();
+  else if (access) {
+    title = ACCESS_TITLE[access] ?? access.toUpperCase();
+    accessUsed = true;
+  } else title = `ZWEITE REIHE ${seite}`.trim();
+  const detail: string[] = [];
+  if (secondRow) detail.push(`Haus ${Math.round(o.offStreet!)} m von der Straße`);
+  if (access && !accessUsed) detail.push(`Haus-Info: ${access}`);
+  return { title, detail: detail.join(' · '), side: ti.side, now: ti.kind === 'here' || ti.distance <= 15, distance: ti.distance };
+}
+
 export interface Steps {
   minus2: string | null;
   plus2: string | null;

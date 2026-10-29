@@ -4,7 +4,7 @@
 import { gps, type Fix } from './gps';
 import { state } from './data';
 import { StreetMatcher, type Match } from './matcher';
-import { onTourChange, tourStreetIds } from './tour';
+import { activePartIds, noteStreet, onTourChange, tourStreetIds } from './tour';
 import type { Index, Street } from './types';
 
 export const matcher = new StreetMatcher(() => state.index);
@@ -34,6 +34,7 @@ let preferredFor: Index | null = null;
 /** Tour-Straßen im Straßenbezug bevorzugen (nach Änderung der Tour oder der Daten). */
 export function refreshPreferred() {
   matcher.preferred = tourStreetIds(state.index);
+  matcher.activePart = activePartIds(state.index);
   preferredFor = state.index;
 }
 
@@ -45,7 +46,11 @@ export function startSession() {
   onTourChange(refreshPreferred);
   gps.subscribe((fix) => {
     if (preferredFor !== state.index) refreshPreferred();
-    if (fix) last = matcher.update(fix);
+    if (fix) {
+      last = matcher.update(fix);
+      // Wechsel von Teil A nach B (oder umgekehrt): Vorrang folgt dem Teil, in dem man fährt
+      if (noteStreet(last.street)) matcher.activePart = activePartIds(state.index);
+    }
     for (const l of listeners) l(last, fix);
   });
 }

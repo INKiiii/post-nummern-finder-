@@ -36,7 +36,7 @@ export function applyTheme(choice: ThemeChoice = themeChoice()) {
     const c = themeChoice();
     const light = c === 'light' || (c === 'auto' && !!mql?.matches);
     document.documentElement.dataset.theme = light ? 'light' : 'dark';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', light ? '#f4f4f0' : '#000000');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', light ? '#f2f2f7' : '#000000');
   };
   resolve();
   if (mql && !(mql as any)._hnf) {
