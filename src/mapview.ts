@@ -1205,6 +1205,9 @@ export class MapView {
       };
     }
     const gOutl = el('g', { class: 'outlines' }, svg);
+    // Hell wie Apple Karten: weiße Straßen mit feinem Rand (darunter, damit Kreuzungen sauber sind)
+    const gCase = el('g', { class: 'cases' }, svg);
+    const mitRand = document.documentElement.dataset.theme === 'light';
     const gStreets = el('g', {}, svg);
     const streetW = Math.max(4, Math.min(14, 6.5 * S));
     const pathOf = (line: [number, number][]) =>
@@ -1257,8 +1260,12 @@ export class MapView {
       const r = rank(s);
       const cls = r === 2 ? 'st st-focus' : r === 1 ? 'st st-tour' : 'st';
       const sw = r === 2 ? streetW + 4 : r === 1 ? streetW + 2 : streetW;
-      if (r === 2) for (const line of s.lines) el('path', { d: pathOf(line), class: 'st st-focus-case', 'stroke-width': sw + 4 }, gStreets);
-      for (const line of s.lines) el('path', { d: pathOf(line), class: cls, 'stroke-width': sw }, gStreets);
+      for (const line of s.lines) {
+        const d = pathOf(line);
+        if (r === 2) el('path', { d, class: 'st st-focus-case', 'stroke-width': sw + 4 }, gStreets);
+        else if (mitRand) el('path', { d, class: 'st-case', 'stroke-width': sw + 2.5 }, gCase);
+        el('path', { d, class: cls, 'stroke-width': sw }, gStreets);
+      }
       if (!s.lines.length && s.start && s === focus) {
         const [x, y] = toF(s.start[0], s.start[1]);
         el('circle', { cx: x, cy: y, r: 8, class: 'st-start' }, gStreets);

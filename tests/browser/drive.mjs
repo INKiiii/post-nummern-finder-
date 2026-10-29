@@ -360,6 +360,22 @@ try {
     await page.click('.menu-btn');
     const imMenu = await text(page, '.menu-first .seg-btn.on');
     check('Tagestour: Leiste „Heute zuerst?“ beim Start, ein Tipp wählt Teil B', sichtbar && weg && imMenu === 'Teil B', `Leiste ${sichtbar ? 'da' : 'fehlt'}, danach ${weg ? 'weg' : 'noch da'}, Menü: ${imMenu}`);
+    // Menü ist ein Bottom-Sheet: am Griff nach unten wischen schließt es, daneben tippen ebenso
+    await page.waitForTimeout(600); // Sheet gleitet herein
+    const griff = await page.locator('.overlay .sheet-grip').boundingBox();
+    await page.mouse.move(griff.x + griff.width / 2, griff.y + griff.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(griff.x + griff.width / 2, griff.y + 60, { steps: 4 });
+    await page.mouse.move(griff.x + griff.width / 2, griff.y + 180, { steps: 4 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    const zuNachWisch = (await page.locator('.overlay').count()) === 0;
+    await page.click('.menu-btn');
+    await page.waitForTimeout(500);
+    await page.mouse.click(196, 40);
+    await page.waitForTimeout(400);
+    const zuNachTipp = (await page.locator('.overlay').count()) === 0;
+    check('Menü als Bottom-Sheet: nach unten wischen und daneben tippen schließt', zuNachWisch && zuNachTipp, `Wischen ${zuNachWisch ? 'ok' : 'offen'}, Tippen ${zuNachTipp ? 'ok' : 'offen'}`);
     await ctx.close();
   }
 

@@ -463,8 +463,15 @@ export function liveScreen(root: HTMLElement) {
 
 /** Menü: selten Gebrauchtes, nur im Stand. Oben der ehrliche Status. */
 function openMenu() {
-  const item = (ic: IconName, label: string, fn: () => void, note = '') =>
-    h('button', { class: 'menu-item', onClick: () => (close(), fn()) }, icon(ic, 26), h('span', null, label, note ? h('small', { class: 'menu-note' }, note) : null));
+  // Zeilen wie in den iOS-Einstellungen: farbiges Symbol, Text, Pfeil
+  const item = (ic: IconName, farbe: string, label: string, fn: () => void, note = '') =>
+    h(
+      'button',
+      { class: 'menu-item', onClick: () => (close(), fn()) },
+      h('span', { class: `mi-ic mi-${farbe}` }, icon(ic, 20)),
+      h('span', null, label, note ? h('small', { class: 'menu-note' }, note) : null),
+      h('span', { class: 'mi-chev', 'aria-hidden': 'true' }, '›'),
+    );
   const statusEl = h('div', { class: 'status-list' });
   // „Heute zuerst“ direkt oben: ein Tipp wählt und schließt das Menü
   const firstPart = getTour().first;
@@ -494,22 +501,28 @@ function openMenu() {
         ),
       )
     : null;
-  const tourItem = item('list', 'Meine Tour', () => show('tour'), tourSuggestions(state.index).length ? 'Vorschlag: oft genutzte Straße' : '');
-  const dataItem = item('data', 'Eigene Daten & Sicherung', () => show('data'));
-  const regionsItem = item('map', 'Gebiete laden / aktualisieren', () => show('regions'));
+  const tourItem = item('list', 'yel', 'Meine Tour', () => show('tour'), tourSuggestions(state.index).length ? 'Vorschlag: oft genutzte Straße' : '');
+  const dataItem = item('data', 'indigo', 'Eigene Daten & Sicherung', () => show('data'));
+  const regionsItem = item('map', 'green', 'Gebiete laden / aktualisieren', () => show('regions'));
   const close = overlay(
     h(
       'div',
       { class: 'dialog menu' },
       statusEl,
       firstEl,
-      tourItem,
-      regionsItem,
-      dataItem,
-      item('road', 'Fehlende Straße anlegen', () => show('newstreet', {})),
-      item('gear', 'Einstellungen & Info', () => show('settings')),
+      h(
+        'div',
+        { class: 'list-group' },
+        tourItem,
+        regionsItem,
+        dataItem,
+        item('road', 'teal', 'Fehlende Straße anlegen', () => show('newstreet', {})),
+        item('gear', 'grey', 'Einstellungen & Info', () => show('settings')),
+      ),
       h('button', { class: 'btn big', onClick: () => close() }, 'Schließen'),
     ),
+    undefined,
+    { dismissible: true },
   );
   void statusSummary().then((st: StatusSummary) => {
     const chip = (ok: boolean, text: string, onClick?: () => void) =>
@@ -522,7 +535,7 @@ function openMenu() {
         : []),
       ...(st.backupDue ? [chip(false, 'Sicherung fällig', () => (close(), show('data')))] : []),
     );
-    if (st.backupDue) dataItem.querySelector('span')!.append(h('small', { class: 'menu-note' }, 'Sicherung fällig (über 14 Tage)'));
+    if (st.backupDue) dataItem.querySelector('span:not(.mi-ic):not(.mi-chev)')!.append(h('small', { class: 'menu-note' }, 'Sicherung fällig (über 14 Tage)'));
   });
 }
 
@@ -558,5 +571,7 @@ function chooseStreet(onDone: () => void) {
       h('p', { class: 'hint' }, 'Gilt, solange du in der Nähe dieser Straße bleibst.'),
       h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
+    undefined,
+    { dismissible: true },
   );
 }

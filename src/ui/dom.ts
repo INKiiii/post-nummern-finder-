@@ -52,16 +52,69 @@ export function toast(msg: string, ms = 2000, action?: { label: string; run: () 
   setTimeout(() => t.remove(), ms);
 }
 
-/** Vollbild-Dialog; liefert eine Schließen-Funktion. */
-export function overlay(content: HTMLElement, onClose?: () => void) {
+const reduceMotion = () => {
+  try {
+    return matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Bottom-Sheet (bzw. Vollbild-Dialog); liefert eine Schließen-Funktion. Es gleitet weich herein
+ * und hinaus. Mit `dismissible` hat es oben einen Griff: nach unten wischen oder daneben tippen
+ * schließt es (nur für Sheets ohne offene Entscheidung, z. B. das Menü).
+ */
+export function overlay(content: HTMLElement, onClose?: () => void, opts: { dismissible?: boolean } = {}) {
   // Meldungen oben würden den Kopf des Dialogs verdecken
   document.querySelectorAll('.toast').forEach((t) => t.remove());
   const o = h('div', { class: 'overlay' }, content);
-  document.body.appendChild(o);
+  let closed = false;
   const close = () => {
-    o.remove();
+    if (closed) return;
+    closed = true;
     onClose?.();
+    if (reduceMotion()) {
+      o.remove();
+      return;
+    }
+    // sanft hinaus; Tipps gehen sofort wieder an die Seite darunter
+    o.classList.add('closing');
+    setTimeout(() => o.remove(), 240);
   };
+  if (opts.dismissible) {
+    const grip = h('div', { class: 'sheet-grip', 'aria-hidden': 'true' });
+    content.prepend(grip);
+    o.addEventListener('click', (e) => {
+      if (e.target === o) close();
+    });
+    // Nach unten wischen: Sheet folgt dem Finger, ab 90 px (oder schnellem Wisch) schließt es
+    let start: { y: number; t: number } | null = null;
+    grip.addEventListener('pointerdown', (e) => {
+      start = { y: e.clientY, t: performance.now() };
+      grip.setPointerCapture(e.pointerId);
+      content.style.transition = 'none';
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const dy = Math.max(0, e.clientY - start.y);
+      content.style.transform = `translateY(${dy}px)`;
+    });
+    const end = (e: PointerEvent) => {
+      if (!start) return;
+      const dy = Math.max(0, e.clientY - start.y);
+      const fast = dy > 30 && dy / Math.max(1, performance.now() - start.t) > 0.6;
+      start = null;
+      content.style.transition = 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)';
+      if (dy > 90 || fast) {
+        content.style.transform = 'translateY(110%)';
+        close();
+      } else content.style.transform = '';
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+  }
+  document.body.appendChild(o);
   return close;
 }
 

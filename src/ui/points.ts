@@ -78,6 +78,8 @@ export function longPressMenu(street: Street | null, lat: number, lon: number, n
       drive?.user ? h('button', { class: 'btn big danger', onClick: removeDriveway }, 'Eigene Einfahrt löschen') : null,
       h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
+    undefined,
+    { dismissible: true },
   );
 }
 
@@ -129,6 +131,8 @@ export function addPointDialog(street: Street, lat: number, lon: number, suggest
       }),
       h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
+    undefined,
+    { dismissible: true },
   );
 }
 
@@ -231,5 +235,7 @@ export function hereMenu(street: Street, number: string, onSaved: () => void) {
       h('button', { class: 'pill-btn outline wide', onClick: driveway }, icon('pin', 24), 'Hier ist die Einfahrt'),
       h('button', { class: 'btn big', onClick: () => close() }, 'Abbrechen'),
     ),
+    undefined,
+    { dismissible: true },
   );
 }
