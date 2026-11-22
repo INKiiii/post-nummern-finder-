@@ -7,6 +7,7 @@ name: Prüfen
 on:
   push:
     branches-ignore: [main]
+    paths-ignore: ["clip-fabrik/**", ".github/workflows/clip-fabrik.yml"]
   workflow_dispatch:
 
 permissions:

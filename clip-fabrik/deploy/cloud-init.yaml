@@ -1,0 +1,35 @@
+#cloud-config
+# =============================================================================
+# Clip-Fabrik – Server per Handy einrichten (Hetzner Cloud oder jeder Anbieter mit Cloud-Init).
+#
+# 1. In der Hetzner-App: Server erstellen → Ubuntu 24.04 → Typ z. B. CPX31 → ganz unten „Cloud config“.
+# 2. Diesen kompletten Text dort einfügen und NUR die Zeile ADMIN_PASSWORD anpassen.
+# 3. Server erstellen. Nach ~2 Minuten zeigt http://<Server-IP> den Fortschritt,
+#    nach ~10 Minuten läuft die App unter https://<IP-mit-Bindestrichen>.sslip.io
+#    (Beispiel: IP 203.0.113.7 → https://203-0-113-7.sslip.io)
+# =============================================================================
+write_files:
+  - path: /root/clipfabrik-install.env
+    permissions: "0600"
+    content: |
+      ADMIN_PASSWORD=HIER-DEIN-PASSWORT-MIND-10-ZEICHEN
+      # Optional – kann auch später in der App eingetragen werden:
+      ANTHROPIC_API_KEY=
+      TWITCH_CLIENT_ID=
+      TWITCH_CLIENT_SECRET=
+      # Eigene Domain (sonst automatisch <IP>.sslip.io):
+      DOMAIN=
+      # Quelle des Codes (bei privatem Repository: https://<Token>@github.com/… mit Lese-Token)
+      REPO_URL=https://github.com/INKiiii/post-nummern-finder-.git
+      BRANCH=main
+
+package_update: true
+packages: [git, curl]
+
+runcmd:
+  - |
+    set -a; . /root/clipfabrik-install.env; set +a
+    [ -z "$DOMAIN" ] && unset DOMAIN
+    git clone --depth 1 -b "$BRANCH" "$REPO_URL" /opt/clipfabrik
+    bash /opt/clipfabrik/clip-fabrik/deploy/setup.sh > /var/log/clipfabrik-setup.log 2>&1
+    sed -i 's/^ANTHROPIC_API_KEY=.*/ANTHROPIC_API_KEY=/; s/^TWITCH_CLIENT_SECRET=.*/TWITCH_CLIENT_SECRET=/' /root/clipfabrik-install.env

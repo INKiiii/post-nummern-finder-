@@ -1,0 +1,105 @@
+# Clip-Fabrik: Backend-Tests (inkl. Render- und streamlink-Integrationstests), Frontend-Build,
+# Oberflächen-Test im Handyformat und Docker-Build. Läuft nur bei Änderungen in clip-fabrik/.
+name: Clip-Fabrik
+
+on:
+  push:
+    paths: ["clip-fabrik/**", ".github/workflows/clip-fabrik.yml"]
+  pull_request:
+    paths: ["clip-fabrik/**", ".github/workflows/clip-fabrik.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clip-fabrik-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: clip-fabrik/backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: ffmpeg und Schriften
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: clip-fabrik/backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt ruff && pip install --no-deps -e .
+      - run: ruff check clipfabrik tests --select F,E9
+      - run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: clip-fabrik/frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: clip-fabrik/backend/requirements*.txt
+      - name: Frontend bauen (Typprüfung + Vite)
+        working-directory: clip-fabrik/frontend
+        run: npm ci && npm run build
+      - name: Backend mit Demo-Daten starten
+        working-directory: clip-fabrik/backend
+        env:
+          DATA_DIR: ${{ runner.temp }}/demo
+          CLIPFABRIK_FAKE_AI: "1"
+          ENABLE_MOCK_PUBLISHER: "1"
+          ADMIN_PASSWORD: demo-passwort-123
+          SECRET_KEY: ci-demo-secret-0123456789
+          FRONTEND_DIST: ${{ github.workspace }}/clip-fabrik/frontend/dist
+          PUBLIC_URL: http://127.0.0.1:8765
+        run: |
+          pip install -r requirements.txt && pip install --no-deps -e .
+          python -m clipfabrik.devtools.seed_demo
+          nohup clipfabrik api --port 8765 > ${{ runner.temp }}/api.log 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8765/api/health && break; sleep 1; done
+      - name: Oberflächen-Test im Handyformat
+        working-directory: clip-fabrik/frontend
+        env:
+          BASE_URL: http://127.0.0.1:8765
+          PASSWORD: demo-passwort-123
+          SHOTS: ${{ runner.temp }}/shots
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+          node tests/e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/shots
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker-Image bauen (CPU)
+        working-directory: clip-fabrik
+        run: docker build -t clipfabrik:ci .
+      - name: Container-Smoke-Test
+        run: |
+          docker run -d --name cf -p 8899:8000 -e SECRET_KEY=ci-secret-0123456789 -e ADMIN_PASSWORD=ci-passwort-123 clipfabrik:ci
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8899/api/health && break; sleep 2; done
+          curl -fs http://127.0.0.1:8899/ | grep -q "Clip-Fabrik"
+          docker exec cf sh -c 'ffmpeg -version | head -1 && streamlink --version && python -c "import faster_whisper"'
+      - name: Compose-Dateien prüfen
+        working-directory: clip-fabrik
+        run: cp .env.example .env && docker compose config -q && docker compose -f docker-compose.yml -f docker-compose.gpu.yml config -q

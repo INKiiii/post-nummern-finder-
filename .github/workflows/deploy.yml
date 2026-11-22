@@ -6,6 +6,7 @@ name: Bauen und veröffentlichen
 on:
   push:
     branches: [main]
+    paths-ignore: ["clip-fabrik/**", ".github/workflows/clip-fabrik.yml"]
   workflow_dispatch:
   schedule:
     - cron: '17 3 * * 1' # wöchentlich Montag früh: Daten aktualisieren

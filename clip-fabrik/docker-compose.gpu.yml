@@ -1,0 +1,19 @@
+# GPU-Erweiterung: Worker (Whisper, Rendering) läuft auf der NVIDIA-GPU.
+# Voraussetzung: NVIDIA-Treiber + nvidia-container-toolkit auf dem Server (Einrichtungsskript erledigt das).
+services:
+  worker:
+    build: { context: ., dockerfile: Dockerfile.gpu }
+    image: clipfabrik-gpu:latest
+    command: ["clipfabrik", "worker", "--concurrency", "2"]
+    environment:
+      WHISPER_DEVICE: cuda
+      WHISPER_COMPUTE_TYPE: float16
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_LIVE_MODEL: ${WHISPER_LIVE_MODEL:-medium}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video, compute, utility]
