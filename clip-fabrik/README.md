@@ -36,7 +36,7 @@ Du brauchst: ein Handy, eine E-Mail-Adresse und eine Zahlungsmethode für den Se
    - Typ: **CPX31** (4 vCPU, 8 GB RAM, 160 GB SSD) für den Start. Mehr dazu unter [Kosten](#3-kosten).
    - SSH-Schlüssel: kannst du weglassen, du bekommst dann ein Root-Passwort per Mail (brauchst du normalerweise nie).
 3. Ganz unten bei **Cloud config** den kompletten Inhalt von [`deploy/cloud-init.yaml`](deploy/cloud-init.yaml) einfügen.
-   **Nur diese eine Zeile ändern:** `ADMIN_PASSWORD=…` (dein Passwort für die App, mindestens 10 Zeichen).
+   **Nur diese eine Zeile ändern:** In `ADMIN_PASSWORD='…'` zwischen den einfachen Anführungszeichen dein Passwort für die App eintragen (mindestens 10 Zeichen, kein `'` im Passwort).
 4. **Erstellen** tippen und die angezeigte IPv4-Adresse merken, z. B. `203.0.113.7`.
 
 ### Schritt 2: Warten und zusehen

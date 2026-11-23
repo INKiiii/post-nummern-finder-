@@ -84,9 +84,11 @@ if [ ! -f .env ]; then
   cp .env.example .env
   PW="${ADMIN_PASSWORD:-$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-16)}"
   sed -i "s|^DOMAIN=.*|DOMAIN=${DOMAIN}|; s|^PUBLIC_URL=.*|PUBLIC_URL=https://${DOMAIN}|" .env
-  sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|; s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${PW}|" .env
+  # Werte für sed escapen (Passwörter dürfen & | \ enthalten)
+  esc() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
+  sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|; s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$(esc "$PW")|" .env
   for v in ANTHROPIC_API_KEY TWITCH_CLIENT_ID TWITCH_CLIENT_SECRET; do
-    if [ -n "${!v:-}" ]; then sed -i "s|^${v}=.*|${v}=${!v}|" .env; fi
+    if [ -n "${!v:-}" ]; then sed -i "s|^${v}=.*|${v}=$(esc "${!v}")|" .env; fi
   done
   if [ "$COMPOSE_FILES" != "-f docker-compose.yml" ]; then
     sed -i "s|^WHISPER_MODEL=.*|WHISPER_MODEL=large-v3|; s|^WHISPER_LIVE_MODEL=.*|WHISPER_LIVE_MODEL=medium|; s|^WORKER_CONCURRENCY=.*|WORKER_CONCURRENCY=2|" .env
