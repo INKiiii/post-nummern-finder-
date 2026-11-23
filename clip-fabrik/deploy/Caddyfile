@@ -1,0 +1,14 @@
+# HTTPS automatisch über Let's Encrypt. DOMAIN z. B. 203-0-113-7.sslip.io (ohne eigene Domain) oder clips.meinedomain.de
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+	}
+	reverse_proxy api:8000 {
+		flush_interval -1
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+}

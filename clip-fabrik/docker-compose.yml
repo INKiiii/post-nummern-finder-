@@ -1,0 +1,62 @@
+# Clip-Fabrik: API (mit App), Worker (Analyse/Rendering), Daemon (Live-Erkennung/Aufnahme), Caddy (HTTPS)
+# Start:  docker compose up -d --build
+# GPU:    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+# Tunnel: docker compose --profile tunnel up -d   (Cloudflare Tunnel statt offener Ports, TUNNEL_TOKEN in .env)
+
+x-app: &app
+  build: .
+  image: clipfabrik:latest
+  env_file: .env
+  environment:
+    DATA_DIR: /data
+    PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN}}
+  volumes:
+    - data:/data
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  api:
+    <<: *app
+    command: ["clipfabrik", "api", "--port", "8000"]
+    expose: ["8000"]
+
+  worker:
+    <<: *app
+    command: ["clipfabrik", "worker"]
+    depends_on: [api]
+    healthcheck: { disable: true }
+
+  daemon:
+    <<: *app
+    command: ["clipfabrik", "daemon"]
+    depends_on: [api]
+    healthcheck: { disable: true }
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN in .env fehlt}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+
+  tunnel:
+    image: cloudflare/cloudflared:2025.11.1
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [api]
+    profiles: ["tunnel"]
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:

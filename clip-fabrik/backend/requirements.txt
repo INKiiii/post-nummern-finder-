@@ -1,0 +1,19 @@
+# Laufzeit (gepinnt auf getestete Versionen, siehe pyproject.toml für Mindestversionen)
+fastapi==0.165.0
+uvicorn[standard]
+sqlalchemy==2.1.9
+pydantic==2.14.4
+pydantic-settings==2.16.3
+cryptography==50.0.2
+argon2-cffi
+itsdangerous
+httpx==0.28.1
+anthropic==2.12.0
+pywebpush==2.5.0
+py-vapid
+python-multipart
+streamlink==8.6.3
+yt-dlp
+numpy==2.5.5
+websockets
+faster-whisper==1.2.1
