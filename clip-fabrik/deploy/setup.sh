@@ -116,9 +116,25 @@ for _ in $(seq 1 60); do
   sleep 10
 done
 
-# Wöchentliches Update (Sonntag 4:30): neuen Stand holen, neu bauen
+# Wöchentliches Update (Sonntag 4:30): neuen Stand holen, neu bauen.
+# Liegt die Clip-Fabrik inzwischen in main, wechselt der Server automatisch dorthin
+# (wichtig für Server, die vor dem Merge vom Arbeits-Branch eingerichtet wurden).
+cat > /usr/local/bin/clipfabrik-update <<UPD
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$APP_DIR/.."
+if git fetch --depth 1 origin main 2>/dev/null && git cat-file -e FETCH_HEAD:clip-fabrik/docker-compose.yml 2>/dev/null; then
+  git checkout -q -B main FETCH_HEAD
+else
+  git pull --ff-only
+fi
+cd "$APP_DIR"
+docker compose $COMPOSE_FILES up -d --build
+docker image prune -f >/dev/null
+UPD
+chmod +x /usr/local/bin/clipfabrik-update
 cat > /etc/cron.d/clipfabrik-update <<CRON
-30 4 * * 0 root cd $APP_DIR && git pull --ff-only >/var/log/clipfabrik-update.log 2>&1 && docker compose $COMPOSE_FILES up -d --build >>/var/log/clipfabrik-update.log 2>&1
+30 4 * * 0 root /usr/local/bin/clipfabrik-update >/var/log/clipfabrik-update.log 2>&1
 CRON
 
 cat > /root/clipfabrik-zugang.txt <<TXT

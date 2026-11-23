@@ -21,8 +21,7 @@ write_files:
       DOMAIN=
       # Quelle des Codes (bei privatem Repository: https://<Token>@github.com/… mit Lese-Token)
       REPO_URL=https://github.com/INKiiii/post-nummern-finder-.git
-      # Solange die Clip-Fabrik noch nicht in main ist, liegt sie auf diesem Branch (nach dem Merge: main)
-      BRANCH=claude/clip-fabrik-app-eo8nms
+      BRANCH=main
 
 package_update: true
 packages: [git, curl]
