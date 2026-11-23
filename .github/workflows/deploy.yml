@@ -35,7 +35,7 @@ jobs:
       - name: OSM-Auszug Niedersachsen laden
         run: |
           mkdir -p data/osm
-          curl -fL --retry 3 -o data/osm/niedersachsen-latest.osm.pbf \
+          curl -fL --retry 5 --retry-delay 15 --retry-connrefused -o data/osm/niedersachsen-latest.osm.pbf \
             https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf
       # Optional: amtliche Adressen (z. B. Hauskoordinaten) zusätzlich zu OSM.
       # Einrichten unter Settings › Secrets and variables › Actions › Variables:
@@ -48,7 +48,7 @@ jobs:
           CONFIG: ${{ vars.OFFICIAL_ADDR_CONFIG || 'scripts/sources/niedersachsen-hk.json' }}
         run: |
           mkdir -p data/official
-          curl -fL --retry 3 -o data/official/download "$URL"
+          curl -fL --retry 5 --retry-delay 15 --retry-connrefused -o data/official/download "$URL"
           if unzip -tq data/official/download >/dev/null 2>&1; then
             unzip -o -q data/official/download -d data/official
             f=$(find data/official -iname '*.csv' -o -iname '*.txt' | head -1)
